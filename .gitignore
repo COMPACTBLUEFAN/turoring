@@ -1,0 +1,14 @@
+# Obsidian: плагины (чужой код, в data.json — токены и пароли синхронизации) и состояние окон
+.obsidian/plugins/
+.obsidian/workspace*.json
+.obsidian/cache
+.trash/
+
+# Системное
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Логи и временное
+*.log
+*.tmp

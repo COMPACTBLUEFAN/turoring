@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Демо: Архитектура OSINT-агрегаторов и Граф деанонимизации (0.SEC / 0.CTF)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #0d1117; --panel: #161b22; --card: #1f242c; --ink: #e6edf3; --muted: #8b949e; --line: #30363d;
+  --accent: #58a6ff; --accent-soft: rgba(56, 139, 253, 0.15);
+  --ok: #3fb950; --ok-soft: rgba(63, 185, 80, 0.15);
+  --warn: #d29922; --warn-soft: rgba(210, 153, 34, 0.15);
+  --bad: #f85149; --bad-soft: rgba(248, 81, 73, 0.15);
+  --purple: #bc8cff; --purple-soft: rgba(188, 140, 255, 0.15);
+  --font: "Golos Text", system-ui, -apple-system, sans-serif; --mono: "JetBrains Mono", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); padding: 20px; line-height: 1.5; }
+.wrap { max-width: 960px; margin: 0 auto; display: grid; gap: 20px; }
+header { border-bottom: 1px solid var(--line); padding-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+h1 { font-size: 22px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; }
+.badge { font-size: 11px; padding: 3px 8px; border-radius: 6px; background: var(--purple-soft); color: var(--purple); font-family: var(--mono); border: 1px solid var(--purple); }
+.sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 16px; }
+.tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 12px; overflow-x: auto; }
+.tab-btn { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-family: var(--font); font-size: 14px; font-weight: 500; transition: all 0.2s; white-space: nowrap; }
+.tab-btn:hover { color: var(--ink); border-color: var(--muted); }
+.tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+.section { display: none; }
+.section.active { display: grid; gap: 18px; }
+
+/* Simulator Controls */
+.controls-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--card); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--line); }
+.select-input { background: var(--bg); border: 1px solid var(--line); color: var(--ink); padding: 8px 12px; border-radius: 6px; font-family: var(--font); font-size: 14px; outline: none; }
+.btn { background: var(--accent); color: #fff; border: 0; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; font-family: var(--font); font-size: 14px; transition: opacity 0.2s; }
+.btn:hover { opacity: 0.9; }
+.btn-reset { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.btn-reset:hover { color: var(--ink); border-color: var(--muted); }
+
+/* Graph Area */
+.graph-container { background: #090d13; border: 1px solid var(--line); border-radius: 10px; min-height: 420px; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+.graph-svg { width: 100%; height: 380px; }
+.graph-legend { display: flex; gap: 14px; padding: 10px 16px; background: rgba(22, 27, 34, 0.8); border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* Logs & Details */
+.console-log { background: #05070a; border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-family: var(--mono); font-size: 12px; color: #a5d6ff; max-height: 140px; overflow-y: auto; line-height: 1.6; }
+.log-step { margin-bottom: 4px; }
+.log-ok { color: var(--ok); }
+.log-warn { color: var(--warn); }
+.log-bad { color: var(--bad); }
+
+/* Venn Diagram / Set Intersection */
+.venn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) { .venn-grid { grid-template-columns: 1fr; } }
+.slider-group { display: grid; gap: 12px; background: var(--card); padding: 16px; border-radius: 8px; border: 1px solid var(--line); }
+.slider-item { display: grid; gap: 6px; }
+.slider-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+.slider-val { font-weight: 700; color: var(--ink); font-family: var(--mono); }
+input[type="range"] { accent-color: var(--accent); width: 100%; cursor: pointer; }
+.stat-box { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px; text-align: center; }
+.stat-num { font-size: 28px; font-weight: 700; font-family: var(--mono); color: var(--bad); }
+
+/* Pipeline diagram */
+.pipeline-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 800px) { .pipeline-flow { grid-template-columns: 1fr; } }
+.pipe-step { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 8px; }
+.pipe-step.active { border-color: var(--accent); background: var(--accent-soft); }
+.pipe-num { font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 700; text-transform: uppercase; }
+.pipe-title { font-size: 15px; font-weight: 700; color: #fff; }
+.pipe-desc { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.pipe-tech { font-family: var(--mono); font-size: 11px; background: rgba(255,255,255,0.05); padding: 3px 6px; border-radius: 4px; display: inline-block; color: var(--purple); width: fit-content; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1><span>🕵️ Архитектура OSINT-агрегатора и Граф связей</span> <span class="badge">0.SEC / CTF</span></h1>
+      <p class="sub">Интерактивная модель деанонимизации: Entity Resolution, обратные индексы и пересечение множеств</p>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="openTab('sim')">🕸 1. Симулятор графа связей (Entity Resolution)</button>
+    <button class="tab-btn" onclick="openTab('venn')">🎯 2. Атака пересечения множеств</button>
+    <button class="tab-btn" onclick="openTab('pipe')">⚙️ 3. Пайплайн данных: от дампа до бота</button>
+  </div>
+
+  <!-- TAB 1: GRAPH SIMULATION -->
+  <div id="tab-sim" class="section active">
+    <div class="controls-bar">
+      <label style="font-size: 13px; color: var(--muted);">Входная зацепка (Seed):</label>
+      <select id="seedSelect" class="select-input">
+        <option value="tg">Никнейм в Telegram: @cyber_ghost</option>
+        <option value="phone">Телефон из объявления: +7 999 123-45-67</option>
+        <option value="car">Госномер авто во дворе: О777ОО77</option>
+      </select>
+      <button class="btn" onclick="runGraphScan()">🚀 Запустить деанон-поиск</button>
+      <button class="btn btn-reset" onclick="resetGraph()">Сбросить</button>
+    </div>
+
+    <div class="graph-container">
+      <svg id="graphSvg" class="graph-svg" viewBox="0 0 860 380"></svg>
+      <div class="graph-legend">
+        <div class="legend-item"><div class="dot" style="background:#58a6ff;"></div> Входной seed</div>
+        <div class="legend-item"><div class="dot" style="background:#d29922;"></div> База утечек / Парсер</div>
+        <div class="legend-item"><div class="dot" style="background:#bc8cff;"></div> Промежуточный узел (телефон/email)</div>
+        <div class="legend-item"><div class="dot" style="background:#f85149;"></div> Итоговая деанонимизация (ФИО/Паспорт)</div>
+      </div>
+    </div>
+
+    <div class="console-log" id="consoleLog">
+      <div class="log-step">[*] Демо готово. Выберите зацепку и запустите деанон-поиск для симуляции поиска по базам.</div>
+    </div>
+  </div>
+
+  <!-- TAB 2: SET INTERSECTION ATTACK -->
+  <div id="tab-venn" class="section">
+    <div class="panel">
+      <h3 style="color: #fff; font-size: 16px;">Математика деанонимизации: триангуляция по трем шумным признакам</h3>
+      <p style="font-size: 13px; color: var(--muted);">
+        В миллионном городе каждый признак по отдельности кажется «безопасным» и не выдает человека. 
+        Но вероятность нахождения человека на <b>пересечении трех независимых баз данных</b> стремится к 100%. Это фундаментальная теорема приватности Л. Суини (L. Sweeney).
+      </p>
+
+      <div class="venn-grid">
+        <div class="slider-group">
+          <div class="slider-item">
+            <div class="slider-header">
+              <span>1. Жители района / Базовая станция:</span>
+              <span id="valA" class="slider-val">50 000</span>
+            </div>
+            <input type="range" id="rangeA" min="5000" max="200000" step="5000" value="50000" oninput="calcVenn()">
+          </div>
+
+          <div class="slider-item">
+            <div class="slider-header">
+              <span>2. Владельцы авто определенной марки и цвета:</span>
+              <span id="valB" class="slider-val">800</span>
+            </div>
+            <input type="range" id="rangeB" min="100" max="5000" step="50" value="800" oninput="calcVenn()">
+          </div>
+
+          <div class="slider-item">
+            <div class="slider-header">
+              <span>3. Участники тематического Telegram-канала:</span>
+              <span id="valC" class="slider-val">150</span>
+            </div>
+            <input type="range" id="rangeC" min="10" max="1000" step="10" value="150" oninput="calcVenn()">
+          </div>
+        </div>
+
+        <div style="display: grid; gap: 12px;">
+          <div class="stat-box">
+            <div style="font-size: 13px; color: var(--muted); margin-bottom: 6px;">Население города (всего кандидатов)</div>
+            <div style="font-size: 20px; font-weight: 700; font-family: var(--mono); color: var(--ink);">1 000 000 чел.</div>
+          </div>
+          <div class="stat-box" style="border-color: var(--bad);">
+            <div style="font-size: 13px; color: var(--muted); margin-bottom: 6px;">Осталось кандидатов на пересечении (A ∩ B ∩ C)</div>
+            <div id="statIntersection" class="stat-num">1 чел.</div>
+            <div id="statVerdict" style="font-size: 12px; margin-top: 6px; color: var(--ok); font-weight: 600;">🎯 100% однозначный деанон!</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: PIPELINE ARCHITECTURE -->
+  <div id="tab-pipe" class="section">
+    <div class="panel">
+      <h3 style="color: #fff; font-size: 16px;">Реальная архитектура сервиса: 4 инженерных слоя</h3>
+      <p style="font-size: 13px; color: var(--muted);">
+        «Глаз Бога» и подобные сервисы не взламывают ресурсы в реальном времени. Это промышленная распределенная система сбора, нормализации и поиска по графам связей.
+      </p>
+
+      <div class="pipeline-flow">
+        <div class="pipe-step">
+          <div class="pipe-num">Слой 1</div>
+          <div class="pipe-title">Сбор (Ingestion)</div>
+          <div class="pipe-desc">Парсинг дампов утечек (SQL, CSV, Mongo), скрапинг открытых API (Telegram MTProto перебор контактов, РСА, Avito, Госуслуги).</div>
+          <div class="pipe-tech">Python / Scrapy / MTProto</div>
+        </div>
+
+        <div class="pipe-step">
+          <div class="pipe-num">Слой 2</div>
+          <div class="pipe-title">Очистка (ETL)</div>
+          <div class="pipe-desc">Нормализация телефонов в E.164, приведение ФИО к единому регистру, геокодирование адресов, хеширование и дедупликация записей.</div>
+          <div class="pipe-tech">Apache Spark / Go workers</div>
+        </div>
+
+        <div class="pipe-step">
+          <div class="pipe-num">Слой 3</div>
+          <div class="pipe-title">Индексы & Граф</div>
+          <div class="pipe-desc">Колоночные и полнотекстовые индексы для мгновенного поиска по ключу. Графовая БД связывает телефоны, авто, пароли и адреса в кластер личности.</div>
+          <div class="pipe-tech">ClickHouse + Neo4j / Elastic</div>
+        </div>
+
+        <div class="pipe-step">
+          <div class="pipe-num">Слой 4</div>
+          <div class="pipe-title">Бот & Ротация</div>
+          <div class="pipe-desc">Telegram-бот выступает лишь тонким клиентом (UI). Ротация зеркал, прокси-фермы для обхода капч, криптопроцессинг для анонимных платежей.</div>
+          <div class="pipe-tech">FastAPI / Redis / Telegram API</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function openTab(tabId) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-' + tabId).classList.add('active');
+}
+
+function log(msg, type='') {
+  const box = document.getElementById('consoleLog');
+  const div = document.createElement('div');
+  div.className = 'log-step ' + (type ? 'log-' + type : '');
+  div.textContent = msg;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('consoleLog').innerHTML = '';
+}
+
+// Graph simulation data
+const scenarios = {
+  tg: {
+    steps: [
+      { log: "[1/4] Поиск по Telegram ID & Никнейму: @cyber_ghost...", type: "" },
+      { log: "[2/4] Запрос к базе утечки форума (2019): Никнейм привязан к email shadow_99@mail.ru", type: "warn" },
+      { log: "[3/4] Запрос к базе доставки еды (2022) по email: найден телефон +7 (999) 765-43-21 и адрес ул. Ленина 15, кв. 42", type: "warn" },
+      { log: "[4/4] Запрос к GetContact & СБП по телефону: Иванов Иван Иванович, банк Тинькофф. Деанон завершен!", type: "bad" }
+    ],
+    nodes: [
+      { id: 0, x: 80, y: 190, r: 24, label: "@cyber_ghost", sub: "Seed (Ник)", color: "#58a6ff" },
+      { id: 1, x: 260, y: 110, r: 20, label: "Дамп Форума", sub: "SQL Leak 2019", color: "#d29922" },
+      { id: 2, x: 440, y: 110, r: 22, label: "shadow_99@mail.ru", sub: "Email", color: "#bc8cff" },
+      { id: 3, x: 440, y: 270, r: 20, label: "Дамп Доставки", sub: "API Leak 2022", color: "#d29922" },
+      { id: 4, x: 620, y: 270, r: 22, label: "+7 999 765-43-21", sub: "Телефон", color: "#bc8cff" },
+      { id: 5, x: 770, y: 190, r: 28, label: "Иванов Иван И.", sub: "ФИО / Паспорт", color: "#f85149" }
+    ],
+    edges: [
+      { from: 0, to: 1, label: "used_nickname" },
+      { from: 1, to: 2, label: "found_email" },
+      { from: 2, to: 3, label: "registered_account" },
+      { from: 3, to: 4, label: "delivery_phone" },
+      { from: 4, to: 5, label: "SBP / GetContact" }
+    ]
+  },
+  phone: {
+    steps: [
+      { log: "[1/4] Поиск по номеру телефона: +7 999 123-45-67...", type: "" },
+      { log: "[2/4] Запрос к дампу СДЭК: найден получатель Петров Алексей, г. Москва", type: "warn" },
+      { log: "[3/4] Запрос к базе РСА (страхование): обнаружен полис ОСАГО на автомобиль Skoda Octavia М123ТВ777", type: "warn" },
+      { log: "[4/4] Запрос к парсеру Avito: найдено 5 архивных объявлений, включая продажу квартиры с точным адресом", type: "bad" }
+    ],
+    nodes: [
+      { id: 0, x: 80, y: 190, r: 24, label: "+7 999 123-45-67", sub: "Seed (Телефон)", color: "#58a6ff" },
+      { id: 1, x: 260, y: 110, r: 20, label: "Дамп СДЭК", sub: "Транспортная БД", color: "#d29922" },
+      { id: 2, x: 440, y: 110, r: 26, label: "Петров Алексей", sub: "ФИО", color: "#f85149" },
+      { id: 3, x: 440, y: 270, r: 20, label: "База РСА / Авто", sub: "Страховая БД", color: "#d29922" },
+      { id: 4, x: 640, y: 270, r: 22, label: "М123ТВ777", sub: "Госномер авто", color: "#bc8cff" },
+      { id: 5, x: 770, y: 190, r: 24, label: "г. Москва, ул. Мира", sub: "Адрес проживания", color: "#f85149" }
+    ],
+    edges: [
+      { from: 0, to: 1, label: "recipient_phone" },
+      { from: 1, to: 2, label: "identity_match" },
+      { from: 0, to: 3, label: "insured_phone" },
+      { from: 3, to: 4, label: "vehicle_plate" },
+      { from: 4, to: 5, label: "registration_address" }
+    ]
+  },
+  car: {
+    steps: [
+      { log: "[1/4] Поиск по госномеру авто: О777ОО77...", type: "" },
+      { log: "[2/4] Запрос к базе штрафов и техосмотра: получен VIN и СТС", type: "warn" },
+      { log: "[3/4] Запрос к утечке парковок Москвы: найден номер телефона владельца", type: "warn" },
+      { log: "[4/4] Запрос к Telegram MTProto (поиск контакта): найден личный аккаунт @rich_driver", type: "bad" }
+    ],
+    nodes: [
+      { id: 0, x: 80, y: 190, r: 24, label: "О777ОО77", sub: "Seed (Авто)", color: "#58a6ff" },
+      { id: 1, x: 260, y: 110, r: 20, label: "База Техосмотра", sub: "ЕАИСТО / Штрафы", color: "#d29922" },
+      { id: 2, x: 440, y: 110, r: 20, label: "VIN: XW8ZZZ...", sub: "Идентификатор", color: "#bc8cff" },
+      { id: 3, x: 440, y: 270, r: 20, label: "База Парковок", sub: "Московский паркинг", color: "#d29922" },
+      { id: 4, x: 620, y: 270, r: 22, label: "+7 916 555-44-33", sub: "Телефон", color: "#bc8cff" },
+      { id: 5, x: 770, y: 190, r: 26, label: "@rich_driver", sub: "Telegram аккаунт", color: "#f85149" }
+    ],
+    edges: [
+      { from: 0, to: 1, label: "plate_lookup" },
+      { from: 1, to: 2, label: "extracted_vin" },
+      { from: 0, to: 3, label: "parking_session" },
+      { from: 3, to: 4, label: "payer_phone" },
+      { from: 4, to: 5, label: "mtproto_sync" }
+    ]
+  }
+};
+
+let currentScanTimeout = null;
+
+function resetGraph() {
+  if (currentScanTimeout) clearTimeout(currentScanTimeout);
+  const svg = document.getElementById('graphSvg');
+  svg.innerHTML = '<text x="430" y="190" text-anchor="middle" fill="#8b949e" font-family="JetBrains Mono" font-size="14">Нажмите «Запустить деанон-поиск» для построения графа</text>';
+  clearLog();
+  log("[*] Система сброшена в исходное состояние.");
+}
+
+function runGraphScan() {
+  resetGraph();
+  clearLog();
+  const seedKey = document.getElementById('seedSelect').value;
+  const data = scenarios[seedKey];
+
+  const svg = document.getElementById('graphSvg');
+  svg.innerHTML = '';
+
+  let stepIdx = 0;
+  function nextStep() {
+    if (stepIdx < data.steps.length) {
+      log(data.steps[stepIdx].log, data.steps[stepIdx].type);
+      stepIdx++;
+      renderPartialGraph(data, stepIdx);
+      currentScanTimeout = setTimeout(nextStep, 700);
+    }
+  }
+  nextStep();
+}
+
+function renderPartialGraph(data, visibleCount) {
+  const svg = document.getElementById('graphSvg');
+  svg.innerHTML = '';
+
+  // Calculate which nodes are visible
+  const maxNode = visibleCount === 1 ? 1 : visibleCount === 2 ? 3 : visibleCount === 3 ? 5 : 6;
+  const visibleNodes = data.nodes.slice(0, maxNode);
+
+  // Render edges
+  data.edges.forEach(e => {
+    if (e.from < maxNode && e.to < maxNode) {
+      const n1 = data.nodes[e.from];
+      const n2 = data.nodes[e.to];
+      
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", n1.x);
+      line.setAttribute("y1", n1.y);
+      line.setAttribute("x2", n2.x);
+      line.setAttribute("y2", n2.y);
+      line.setAttribute("stroke", "#30363d");
+      line.setAttribute("stroke-width", "2");
+      line.setAttribute("stroke-dasharray", "4");
+      svg.appendChild(line);
+
+      // Edge label
+      const midX = (n1.x + n2.x) / 2;
+      const midY = (n1.y + n2.y) / 2 - 6;
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", midX);
+      text.setAttribute("y", midY);
+      text.setAttribute("fill", "#8b949e");
+      text.setAttribute("font-family", "JetBrains Mono");
+      text.setAttribute("font-size", "10");
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = e.label;
+      svg.appendChild(text);
+    }
+  });
+
+  // Render nodes
+  visibleNodes.forEach(n => {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+
+    // Glow
+    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    circle.setAttribute("cx", n.x);
+    circle.setAttribute("cy", n.y);
+    circle.setAttribute("r", n.r);
+    circle.setAttribute("fill", n.color);
+    circle.setAttribute("opacity", "0.2");
+    g.appendChild(circle);
+
+    // Inner circle
+    const inner = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    inner.setAttribute("cx", n.x);
+    inner.setAttribute("cy", n.y);
+    inner.setAttribute("r", n.r - 4);
+    inner.setAttribute("fill", "#161b22");
+    inner.setAttribute("stroke", n.color);
+    inner.setAttribute("stroke-width", "2");
+    g.appendChild(inner);
+
+    // Node text
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    title.setAttribute("x", n.x);
+    title.setAttribute("y", n.y - n.r - 8);
+    title.setAttribute("fill", "#fff");
+    title.setAttribute("font-family", "Golos Text");
+    title.setAttribute("font-size", "12");
+    title.setAttribute("font-weight", "600");
+    title.setAttribute("text-anchor", "middle");
+    title.textContent = n.label;
+    g.appendChild(title);
+
+    const sub = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    sub.setAttribute("x", n.x);
+    sub.setAttribute("y", n.y + n.r + 14);
+    sub.setAttribute("fill", "#8b949e");
+    sub.setAttribute("font-family", "JetBrains Mono");
+    sub.setAttribute("font-size", "10");
+    sub.setAttribute("text-anchor", "middle");
+    sub.textContent = n.sub;
+    g.appendChild(sub);
+
+    svg.appendChild(g);
+  });
+}
+
+// Venn Calculator
+function calcVenn() {
+  const pop = 1000000;
+  const a = parseInt(document.getElementById('rangeA').value);
+  const b = parseInt(document.getElementById('rangeB').value);
+  const c = parseInt(document.getElementById('rangeC').value);
+
+  document.getElementById('valA').textContent = a.toLocaleString();
+  document.getElementById('valB').textContent = b.toLocaleString();
+  document.getElementById('valC').textContent = c.toLocaleString();
+
+  // Theoretical independent probability intersection: pop * (A/pop) * (B/pop) * (C/pop)
+  const pA = a / pop;
+  const pB = b / pop;
+  const pC = c / pop;
+  const expectedIntersection = pop * pA * pB * pC;
+
+  const resultBox = document.getElementById('statIntersection');
+  const verdict = document.getElementById('statVerdict');
+
+  if (expectedIntersection < 1) {
+    resultBox.textContent = "< 1 чел. (точность до 1)";
+    verdict.textContent = "🎯 100% однозначный деанон (уникальное совпадение)!";
+    verdict.style.color = "var(--ok)";
+  } else if (expectedIntersection <= 5) {
+    resultBox.textContent = Math.round(expectedIntersection) + " чел.";
+    verdict.textContent = "⚠️ Высокая вероятность деанона (узкая группа подозреваемых)";
+    verdict.style.color = "var(--warn)";
+  } else {
+    resultBox.textContent = Math.round(expectedIntersection) + " чел.";
+    verdict.textContent = "🛡 Шумное множество (нужна 4-я база для деанона)";
+    verdict.style.color = "var(--muted)";
+  }
+}
+
+resetGraph();
+calcVenn();
+</script>
+
+</body>
+</html>
