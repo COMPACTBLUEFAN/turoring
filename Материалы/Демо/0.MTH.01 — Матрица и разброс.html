@@ -1,0 +1,229 @@
+<meta charset="utf-8">
+<title>Матрица и разброс</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: «тетрадь в клетку» — две вкладки: слева холст (сетка), справа пульт; на телефоне пульт уходит под холст. Числа — за кнопкой «после заданий» */
+:root{
+  --bg:#eef2f4; --paper:#fbfcfd; --ink:#1b2630; --muted:#5d6b76; --grid:#dbe4ea; --grid-strong:#b9c7d1;
+  --i:#c4462b; --j:#2a6fb0; --fill:rgba(42,111,176,.16); --mean:#c4462b; --median:#2f7d4f; --band:rgba(47,125,79,.12); --accent:#2a6fb0; --hidden:#e3e9ee;
+  --body:"Golos Text","Segoe UI",system-ui,sans-serif; --mono:"JetBrains Mono",Consolas,"Courier New",monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10171c; --paper:#162028; --ink:#e2e9ee; --muted:#93a3ae; --grid:#22303a; --grid-strong:#34454f;
+  --i:#f08a6c; --j:#74b4ec; --fill:rgba(116,180,236,.18); --mean:#f08a6c; --median:#7fd19c; --band:rgba(127,209,156,.12); --accent:#74b4ec; --hidden:#22303a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10171c; --paper:#162028; --ink:#e2e9ee; --muted:#93a3ae; --grid:#22303a; --grid-strong:#34454f;
+  --i:#f08a6c; --j:#74b4ec; --fill:rgba(116,180,236,.18); --mean:#f08a6c; --median:#7fd19c; --band:rgba(127,209,156,.12); --accent:#74b4ec; --hidden:#22303a; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 40px}
+.wrap{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1{font-size:1.55rem;margin:0;text-wrap:balance}
+.lead{color:var(--muted);margin:0;max-width:65ch}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+button{font:500 .92rem var(--body);border:1px solid var(--grid-strong);background:var(--paper);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
+button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.stage{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:720px){.stage{grid-template-columns:1fr}}
+.board{background:var(--paper);border:1px solid var(--grid-strong);border-radius:10px;padding:8px}
+canvas{display:block;width:100%;height:auto;max-width:100%}
+.panel{display:flex;flex-direction:column;gap:14px;min-width:0}
+.box{background:var(--paper);border:1px solid var(--grid);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.box h2{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.col{display:flex;flex-direction:column;gap:6px}
+.col b{font-family:var(--mono);font-weight:600}
+.col.i b{color:var(--i)} .col.j b{color:var(--j)}
+label{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.9rem}
+input[type=range]{flex:1;min-width:0;accent-color:var(--accent)}
+output{font-family:var(--mono);min-width:3.2em;text-align:right;font-variant-numeric:tabular-nums}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.presets button{padding:5px 9px;font-size:.85rem}
+.nums{font-family:var(--mono);font-variant-numeric:tabular-nums;display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:.92rem}
+.nums dt{color:var(--muted)} .nums dd{margin:0}
+.veil{background:var(--hidden);border-radius:8px;padding:10px 12px;color:var(--muted);font-size:.9rem}
+textarea{width:100%;box-sizing:border-box;font:400 .92rem var(--mono);background:var(--bg);color:var(--ink);border:1px solid var(--grid-strong);border-radius:8px;padding:8px;resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:.85rem;color:var(--muted)}
+.sw{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.note{font-size:.88rem;color:var(--muted);margin:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <h1>Матрица и разброс</h1>
+  <p class="lead">Демо к Сессии 8 (<code>0.MTH.01</code>). Слева видно, что происходит, справа — пульт. Числа прячутся за кнопкой: сначала посчитай задания руками, потом сверяйся.</p>
+
+  <div class="tabs" role="tablist">
+    <button id="tab-matrix" aria-pressed="true">Матрица</button>
+    <button id="tab-spread" aria-pressed="false">Разброс</button>
+    <button id="reveal" aria-pressed="false">Показать числа (после заданий)</button>
+  </div>
+
+  <section id="view-matrix" class="stage">
+    <div class="board"><canvas id="cm" width="560" height="560" aria-label="Сетка до и после преобразования"></canvas></div>
+    <div class="panel">
+      <div class="box">
+        <h2>Столбцы матрицы</h2>
+        <div class="cols">
+          <div class="col i"><b>1-й столбец: куда едет î</b>
+            <label for="a">x <input id="a" type="range" min="-3" max="3" step="0.5" value="1"><output id="ao">1</output></label>
+            <label for="c">y <input id="c" type="range" min="-3" max="3" step="0.5" value="0"><output id="co">0</output></label>
+          </div>
+          <div class="col j"><b>2-й столбец: куда едет ĵ</b>
+            <label for="b">x <input id="b" type="range" min="-3" max="3" step="0.5" value="0"><output id="bo">0</output></label>
+            <label for="d">y <input id="d" type="range" min="-3" max="3" step="0.5" value="1"><output id="do">1</output></label>
+          </div>
+        </div>
+        <div class="presets">
+          <button data-m="1,0,0,1">Ничего не менять</button>
+          <button data-m="0,1,-1,0">Поворот 90°</button>
+          <button data-m="1,0,1,1">Скос</button>
+          <button data-m="2,0,0,1.5">Растяжение</button>
+          <button data-m="-1,0,0,1">Зеркало</button>
+        </div>
+        <p class="note">Пунктир — исходный квадрат из î и ĵ. Закрашено — куда он переехал. Площадь закрашенного против исходного и есть определитель.</p>
+      </div>
+      <div class="box">
+        <h2>Числа</h2>
+        <div id="mveil" class="veil">Скрыто, пока не сделаешь задание 1.</div>
+        <dl id="mnums" class="nums" hidden>
+          <dt>det</dt><dd id="det"></dd>
+          <dt>площадь</dt><dd id="area"></dd>
+          <dt>(1, 2) →</dt><dd id="img"></dd>
+          <dt>угол î, ĵ</dt><dd id="ang"></dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-spread" class="stage" hidden>
+    <div class="board"><canvas id="cs" width="560" height="300" aria-label="Замеры времени ответа на оси"></canvas>
+      <div class="legend" style="padding:6px 6px 2px">
+        <span><i class="sw" style="background:var(--mean)"></i>среднее</span>
+        <span><i class="sw" style="background:var(--median)"></i>медиана</span>
+        <span><i class="sw" style="background:var(--band);height:10px"></i>среднее ± σ</span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="box">
+        <h2>Время ответа агента, с</h2>
+        <textarea id="data" rows="3" aria-label="Замеры через запятую">2.1, 1.9, 2.4, 2.0, 2.2, 1.8, 2.3</textarea>
+        <div class="row">
+          <button id="outlier">+ таймаут 60 с</button>
+          <button id="reset">Сбросить пример</button>
+        </div>
+        <p class="note">Пример — замеры для демо, не твои данные. Можно вписать свои числа через запятую.</p>
+      </div>
+      <div class="box">
+        <h2>Числа</h2>
+        <div id="sveil" class="veil">Скрыто, пока не сделаешь задание 2.</div>
+        <dl id="snums" class="nums" hidden>
+          <dt>n</dt><dd id="sn"></dd>
+          <dt>среднее</dt><dd id="smean"></dd>
+          <dt>медиана</dt><dd id="smed"></dd>
+          <dt>дисперсия (÷n)</dt><dd id="svar"></dd>
+          <dt>σ</dt><dd id="ssd"></dd>
+          <dt>z последнего</dt><dd id="sz"></dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const fmt=x=>{const r=Math.round(x*100)/100;return (Object.is(r,-0)?0:r).toString().replace('.',',')};
+  let revealed=false;
+
+  function fit(cv,h){const w=cv.parentElement.clientWidth-16;const dpr=window.devicePixelRatio||1;
+    cv.style.height=(h?h:w)+'px';cv.width=Math.round(w*dpr);cv.height=Math.round((h?h:w)*dpr);
+    const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);return {ctx,w,h:h?h:w}}
+
+  /* ---------- Матрица ---------- */
+  const ids=['a','b','c','d'];
+  function M(){return Object.fromEntries(ids.map(k=>[k,parseFloat($(k).value)]))}
+  function drawMatrix(){
+    const {a,b,c,d}=M(); ids.forEach(k=>$(k+'o').textContent=fmt(parseFloat($(k).value)));
+    const cv=$('cm'); if(cv.offsetParent===null) return;
+    const {ctx,w}=fit(cv); const R=4, s=w/(2*R), o=w/2;
+    const P=(x,y)=>[o+x*s,o-y*s]; const T=(x,y)=>[a*x+b*y,c*x+d*y];
+    ctx.clearRect(0,0,w,w); ctx.fillStyle=css('--paper'); ctx.fillRect(0,0,w,w);
+    ctx.lineWidth=1; ctx.strokeStyle=css('--grid');
+    for(let k=-R;k<=R;k++){ctx.beginPath();ctx.moveTo(...P(k,-R));ctx.lineTo(...P(k,R));ctx.stroke();ctx.beginPath();ctx.moveTo(...P(-R,k));ctx.lineTo(...P(R,k));ctx.stroke()}
+    ctx.strokeStyle=css('--grid-strong'); ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(...P(0,-R));ctx.lineTo(...P(0,R));ctx.moveTo(...P(-R,0));ctx.lineTo(...P(R,0));ctx.stroke();
+    /* преобразованная сетка */
+    ctx.save(); ctx.globalAlpha=.55; ctx.strokeStyle=css('--j'); ctx.lineWidth=.8;
+    for(let k=-6;k<=6;k++){let p=T(k,-6),q=T(k,6);ctx.beginPath();ctx.moveTo(...P(...p));ctx.lineTo(...P(...q));ctx.stroke();
+      p=T(-6,k);q=T(6,k);ctx.beginPath();ctx.moveTo(...P(...p));ctx.lineTo(...P(...q));ctx.stroke()}
+    ctx.restore();
+    /* исходный квадрат */
+    ctx.setLineDash([6,5]); ctx.strokeStyle=css('--muted'); ctx.lineWidth=1.5;
+    ctx.beginPath();[[0,0],[1,0],[1,1],[0,1]].forEach((p,i)=>i?ctx.lineTo(...P(...p)):ctx.moveTo(...P(...p)));ctx.closePath();ctx.stroke(); ctx.setLineDash([]);
+    /* образ квадрата */
+    ctx.fillStyle=css('--fill'); ctx.strokeStyle=css('--j'); ctx.lineWidth=2;
+    ctx.beginPath();[[0,0],[1,0],[1,1],[0,1]].map(p=>T(...p)).forEach((p,i)=>i?ctx.lineTo(...P(...p)):ctx.moveTo(...P(...p)));ctx.closePath();ctx.fill();ctx.stroke();
+    arrow(ctx,P(0,0),P(a,c),css('--i'),'î'); arrow(ctx,P(0,0),P(b,d),css('--j'),'ĵ');
+    const det=a*d-b*c; $('det').textContent=fmt(det); $('area').textContent='× '+fmt(Math.abs(det))+(det<0?' (перевёрнута)':'');
+    const [x,y]=T(1,2); $('img').textContent='('+fmt(x)+'; '+fmt(y)+')';
+    const li=Math.hypot(a,c), lj=Math.hypot(b,d);
+    $('ang').textContent=(li&&lj)?fmt(Math.acos(Math.max(-1,Math.min(1,(a*b+c*d)/(li*lj))))*180/Math.PI)+'°':'—';
+  }
+  function arrow(ctx,[x0,y0],[x1,y1],col,lab){
+    ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();
+    const an=Math.atan2(y1-y0,x1-x0),L=11; if(Math.hypot(x1-x0,y1-y0)>2){ctx.beginPath();ctx.moveTo(x1,y1);
+      ctx.lineTo(x1-L*Math.cos(an-.4),y1-L*Math.sin(an-.4));ctx.lineTo(x1-L*Math.cos(an+.4),y1-L*Math.sin(an+.4));ctx.closePath();ctx.fill()}
+    ctx.font='600 15px '+css('--mono');ctx.fillText(lab,x1+6,y1-6);
+  }
+  ids.forEach(k=>$(k).addEventListener('input',drawMatrix));
+  document.querySelectorAll('[data-m]').forEach(bt=>bt.addEventListener('click',()=>{
+    const [a,c,b,d]=bt.dataset.m.split(',');$('a').value=a;$('c').value=c;$('b').value=b;$('d').value=d;drawMatrix()}));
+
+  /* ---------- Разброс ---------- */
+  const SAMPLE='2.1, 1.9, 2.4, 2.0, 2.2, 1.8, 2.3';
+  function parse(){return $('data').value.split(/[,;\s]+/).map(t=>parseFloat(t.replace(',','.'))).filter(Number.isFinite)}
+  function stats(v){const n=v.length; if(!n) return null; const m=v.reduce((s,x)=>s+x,0)/n;
+    const sv=[...v].sort((x,y)=>x-y); const med=n%2?sv[(n-1)/2]:(sv[n/2-1]+sv[n/2])/2;
+    const vr=v.reduce((s,x)=>s+(x-m)**2,0)/n; return {n,m,med,vr,sd:Math.sqrt(vr),last:v[n-1]}}
+  function drawSpread(){
+    const v=parse(), st=stats(v);
+    if(st){$('sn').textContent=st.n;$('smean').textContent=fmt(st.m)+' с';$('smed').textContent=fmt(st.med)+' с';
+      $('svar').textContent=fmt(st.vr)+' с²';$('ssd').textContent=fmt(st.sd)+' с';$('sz').textContent=st.sd?fmt((st.last-st.m)/st.sd):'—'}
+    const cv=$('cs'); if(cv.offsetParent===null) return;
+    const {ctx,w,h}=fit(cv,260); ctx.fillStyle=css('--paper');ctx.fillRect(0,0,w,h);
+    if(!st){ctx.fillStyle=css('--muted');ctx.font='14px '+css('--body');ctx.fillText('Впиши числа через запятую',16,40);return}
+    const lo=0, hi=Math.max(5,Math.ceil(Math.max(...v)*1.1)), pad=28, X=x=>pad+(x-lo)/(hi-lo)*(w-2*pad), base=h-46;
+    ctx.fillStyle=css('--band'); ctx.fillRect(X(st.m-st.sd),24,Math.max(2,X(st.m+st.sd)-X(st.m-st.sd)),base-24);
+    ctx.strokeStyle=css('--grid-strong');ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(pad,base);ctx.lineTo(w-pad,base);ctx.stroke();
+    ctx.fillStyle=css('--muted');ctx.font='12px '+css('--mono');ctx.textAlign='center';
+    const step=hi<=10?1:hi<=30?5:10; for(let t=0;t<=hi;t+=step){ctx.beginPath();ctx.moveTo(X(t),base);ctx.lineTo(X(t),base+5);ctx.stroke();ctx.fillText(t,X(t),base+18)}
+    ctx.fillText('секунды',w/2,base+36);
+    const cnt={}; ctx.fillStyle=css('--ink');
+    v.forEach(x=>{const key=Math.round(X(x)/9);cnt[key]=(cnt[key]||0)+1;ctx.beginPath();ctx.arc(X(x),base-8-(cnt[key]-1)*12,5,0,7);ctx.fill()});
+    line(ctx,X(st.m),24,base,css('--mean'),'среднее',-1); line(ctx,X(st.med),24,base,css('--median'),'медиана',1);
+  }
+  function line(ctx,x,y0,y1,col,lab,side){ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(x,y0);ctx.lineTo(x,y1);ctx.stroke();
+    ctx.font='600 12px '+css('--body');ctx.textAlign=side<0?'right':'left';ctx.fillText(lab,x+side*5,y0+12+(side>0?16:0))}
+  $('data').addEventListener('input',drawSpread);
+  $('outlier').addEventListener('click',()=>{$('data').value=$('data').value.trim()+', 60';drawSpread()});
+  $('reset').addEventListener('click',()=>{$('data').value=SAMPLE;drawSpread()});
+
+  /* ---------- Вкладки, раскрытие, тема ---------- */
+  function show(which){const m=which==='matrix';$('view-matrix').hidden=!m;$('view-spread').hidden=m;
+    $('tab-matrix').setAttribute('aria-pressed',m);$('tab-spread').setAttribute('aria-pressed',!m);redraw()}
+  $('tab-matrix').addEventListener('click',()=>show('matrix')); $('tab-spread').addEventListener('click',()=>show('spread'));
+  $('reveal').addEventListener('click',()=>{revealed=!revealed;$('reveal').setAttribute('aria-pressed',revealed);
+    $('reveal').textContent=revealed?'Скрыть числа':'Показать числа (после заданий)';
+    ['mnums','snums'].forEach(i=>$(i).hidden=!revealed);['mveil','sveil'].forEach(i=>$(i).hidden=revealed)});
+  function redraw(){drawMatrix();drawSpread()}
+  window.addEventListener('resize',redraw);
+  try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redraw)}catch(e){}
+  new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(redraw);
+  redraw();
+})();
+</script>

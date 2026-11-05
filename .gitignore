@@ -12,3 +12,10 @@ desktop.ini
 # Логи и временное
 *.log
 *.tmp
+
+# Ссылка .agents/skills → .claude/skills (junction): навыки уже в git по основному пути
+.agents/
+
+# Python
+__pycache__/
+*.pyc

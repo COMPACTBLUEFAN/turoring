@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Пирамида ISA-95</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: экран диспетчерской — пирамида уровней слева, паспорт уровня справа; ниже — два прогона сигнала и закрытый разбор. Серый «HMI»-фон, цвет — только для состояния. */
+:root{
+  --bg:#e4e7ea; --panel:#f4f5f6; --ink:#1d2328; --muted:#5b6670; --line:#c3c9cf;
+  --accent:#1f6f8b; --ot:#7a5c1e; --ok:#2f7d4f; --warn:#a86b00; --bad:#b3362c;
+  --l4:#d7e3ec; --l3:#d9e6df; --l2:#e6e1d3; --l1:#ebdccf; --l0:#e8d4d0;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#171b1f; --panel:#20262b; --ink:#e3e7ea; --muted:#9aa5ae; --line:#38424a;
+  --accent:#5fb3d1; --ot:#d4a650; --ok:#5cc28a; --warn:#e0a53a; --bad:#ec7468;
+  --l4:#22323d; --l3:#23352c; --l2:#363224; --l1:#3a2e25; --l0:#3b2726; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#171b1f; --panel:#20262b; --ink:#e3e7ea; --muted:#9aa5ae; --line:#38424a;
+  --accent:#5fb3d1; --ot:#d4a650; --ok:#5cc28a; --warn:#e0a53a; --bad:#ec7468;
+  --l4:#22323d; --l3:#23352c; --l2:#363224; --l1:#3a2e25; --l0:#3b2726; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1040px;margin:0 auto;display:grid;gap:22px}
+h1,h2,h3{font-family:var(--display);font-weight:700;letter-spacing:.01em;text-wrap:balance;margin:0}
+h1{font-size:2.1rem;line-height:1.1}
+h2{font-size:1.45rem}
+h3{font-size:1.15rem}
+.lead{color:var(--muted);max-width:68ch;margin:6px 0 0}
+.tag{font:600 .72rem/1 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.mission{border:1px solid var(--line);border-left:4px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:4px}
+.mission p{margin:4px 0 0}
+.grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+.pyr{display:grid;gap:6px}
+.lvl{display:grid;grid-template-columns:56px 1fr auto;align-items:center;gap:10px;border:1px solid var(--line);border-radius:3px;padding:10px 12px;cursor:pointer;text-align:left;font:inherit;color:inherit;transition:outline-color .15s}
+.lvl:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.lvl[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:1px}
+.lvl .n{font:700 1.3rem/1 var(--display)}
+.lvl .t{font-weight:600}
+.lvl .s{display:block;font-size:.85rem;color:var(--muted);font-weight:400}
+.lvl .time{font:.78rem/1.2 var(--mono);color:var(--muted);text-align:right}
+.lvl.pulse{animation:pulse .9s ease}
+@keyframes pulse{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 10px transparent}}
+@media (prefers-reduced-motion:reduce){.lvl.pulse{animation:none;outline:3px solid var(--warn)}}
+.zone{display:flex;align-items:center;gap:8px;font:600 .72rem/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ot);padding:2px 4px}
+.zone::before,.zone::after{content:"";flex:1;border-top:2px dashed var(--ot)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px 18px;min-width:0}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:12px 0 0}
+dt{font:600 .72rem/1.6 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+dd{margin:0}
+.c1{color:var(--accent);font-weight:600}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button.b{font:600 .95rem var(--body);background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:3px;padding:8px 14px;cursor:pointer}
+button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+button.b:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button.b:disabled{opacity:.45;cursor:default}
+.log{font:.86rem/1.55 var(--mono);display:grid;gap:6px;margin-top:12px}
+.log div{display:grid;grid-template-columns:5.2rem 2.6rem 1fr;gap:10px;padding:6px 8px;border-left:3px solid var(--line);background:var(--bg);border-radius:2px}
+.log .alarm{border-left-color:var(--bad)}
+.log .k{color:var(--muted)}
+.scale{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;font:.78rem var(--mono)}
+.scale span{border:1px solid var(--line);padding:3px 8px;border-radius:2px}
+.agent{display:grid;gap:8px;margin-top:12px}
+.agent div{display:grid;grid-template-columns:7.5rem 1fr;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:3px;background:var(--bg)}
+.v{font:600 .8rem/1.3 var(--mono);text-transform:uppercase}
+.v.ok{color:var(--ok)} .v.warn{color:var(--warn)} .v.bad{color:var(--bad)}
+.note{font-size:.88rem;color:var(--muted)}
+@media (max-width:520px){.log div{grid-template-columns:4.4rem 2.2rem 1fr;font-size:.8rem}.agent div{grid-template-columns:1fr}.lvl{grid-template-columns:44px 1fr}.lvl .time{grid-column:2;text-align:left}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <span class="tag">0.PAI.01 · Пирамида автоматизации</span>
+    <h1>Пирамида ISA-95: от датчика до 1С</h1>
+    <p class="lead">Пять уровней завода. Нажми на уровень — увидишь, что на нём стоит, за какое время он принимает решения и где здесь 1С. Ниже — два прогона: заказ идёт сверху вниз, авария — снизу вверх.</p>
+  </header>
+
+  <div class="mission">
+    <span class="tag">Миссия → задание 3</span>
+    <p>Прогони оба сценария до конца. Запиши: <b>а)</b> какой уровень реагирует на перегрев первым и за какое время; <b>б)</b> на каком шаге об аварии узнаёт ERP и сколько к этому моменту прошло; <b>в)</b> где проходит граница IT и OT.</p>
+  </div>
+
+  <div class="grid">
+    <div class="pyr" id="pyr" role="group" aria-label="Уровни пирамиды"></div>
+    <div class="card" id="info" aria-live="polite"></div>
+  </div>
+
+  <section class="card">
+    <h2>Прогон сигнала</h2>
+    <p class="note">Шаг за шагом. Подсвечивается уровень, который сейчас действует; время — от начала события.</p>
+    <div class="btns">
+      <button class="b" id="s-down">Заказ: сверху вниз</button>
+      <button class="b" id="s-up">Перегрев: снизу вверх</button>
+      <button class="b primary" id="next" disabled>Следующий шаг</button>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <section class="card">
+    <h2>Куда поставить AI-агента</h2>
+    <p class="note">Это разбор задания 4. Сначала ответь в файле занятия, потом открывай.</p>
+    <div class="btns"><button class="b" id="reveal">Показать разбор (после заданий)</button></div>
+    <div class="agent" id="agent" hidden>
+      <div><span class="v ok">Можно</span><span><b>L4–L3, чтение и советы.</b> Агент над 1С и MES: «почему заказ 1042 опаздывает», сводка простоев за смену, черновик перепланирования, который утверждает человек. Ошибка агента стоит часов работы, а не станка.</span></div>
+      <div><span class="v warn">Осторожно</span><span><b>L2, ассистент оператора.</b> Агент читает тревоги SCADA и подсказывает причину, но кнопку жмёт человек (human-in-the-loop). Опасность — prompt injection через текст тревоги или журнала и «уверенный» неверный совет в аварию.</span></div>
+      <div><span class="v bad">Нельзя напрямую</span><span><b>L1, запись уставок в ПЛК.</b> ПЛК отвечает за миллисекунды, модель — за секунды и может ошибиться. Если агент меняет уставку, между ними стоят жёсткие пределы в ПЛК, подтверждение человека и аппаратная защита, которую агент не может отключить.</span></div>
+      <div><span class="v bad">Нет</span><span><b>L0, защита и блокировки.</b> Аварийный останов и блокировки остаются детерминированными: реле, ПЛК безопасности. Агент не находится в контуре защиты ни при каких условиях.</span></div>
+      <p class="note">Правило большого пальца: чем ниже уровень, тем короче время реакции и тем дороже ошибка. Агент живёт там, где время — минуты и дольше, а ошибку можно откатить.</p>
+    </div>
+  </section>
+
+  <p class="note">Границы уровней в источниках расходятся: по ISA (isa.org) датчики относят к уровню 1, ПЛК — к уровню 2, SCADA — к 2–3; в модели Purdue между уровнями 3 и 4 стоит DMZ («уровень 3.5»). Здесь — самая распространённая раскладка «датчики → ПЛК → SCADA → MES → ERP». Порядок и время реакции от раскладки не зависят.</p>
+</div>
+
+<script>
+const L=[
+ {n:4,bg:"--l4",name:"Планирование и логистика",short:"ERP",time:"месяцы · недели · дни",
+  what:"ERP: заказы, закупки, склад, деньги, план производства на месяц.",ex:"1С:ERP, SAP S/4HANA",who:"плановики, снабжение, бухгалтерия",
+  data:"заказ на 500 шт к 15-му; остатки сырья; себестоимость",net:"IT — офисная сеть",one:"Да: 1С:ERP, 1С:УТ, бухгалтерия — классическое место 1С."},
+ {n:3,bg:"--l3",name:"Управление производством",short:"MES",time:"смены · часы · минуты",
+  what:"MES: расписание смены, производственные задания, учёт выпуска и простоев, качество, прослеживаемость партий.",ex:"1С:MES Оперативное управление производством, Siemens Opcenter",who:"мастер смены, технолог, ОТК",
+  data:"задание на смену: линия 2, 500 шт, рецепт Б; простой 25 мин",net:"граница IT/OT (в Purdue — DMZ, «3.5»)",one:"Да: 1С:MES и интеграция 1С ↔ MES — главный стык «бизнес — цех»."},
+ {n:2,bg:"--l2",name:"Диспетчерское управление",short:"SCADA / HMI",time:"секунды",
+  what:"SCADA: собирает данные с ПЛК, рисует мнемосхемы, поднимает тревоги, хранит историю (historian). Оператор меняет уставки.",ex:"WinCC, MasterSCADA, Ignition",who:"оператор, диспетчер",
+  data:"T=72 °C, уставка 75 °C; тревога «перегрев насоса Н-3»",net:"OT — сеть цеха",one:"Обычно нет. 1С получает итоги через MES или историк, а не с мнемосхемы."},
+ {n:1,bg:"--l1",name:"Управление процессом",short:"ПЛК",time:"миллисекунды (цикл 1–100 мс)",
+  what:"ПЛК: по кругу читает входы, считает логику, пишет выходы. Регуляторы, блокировки, последовательности шагов.",ex:"Siemens S7-1500, ОВЕН ПЛК210",who:"инженер АСУ ТП (программирует)",
+  data:"цикл 10 мс: вход T > 85 °C → выход «насос стоп»",net:"OT — полевая шина: Modbus, Profinet, OPC UA",one:"Нет. Здесь живёт код на языках МЭК 61131-3, не 1С."},
+ {n:0,bg:"--l0",name:"Физический процесс",short:"датчики и приводы",time:"физика: непрерывно",
+  what:"Сам процесс и его «органы чувств» и «руки»: датчики температуры и давления, клапаны, двигатели, частотники.",ex:"термопара, датчик давления 4–20 мА, клапан, привод",who:"КИПиА, механики",
+  data:"ток 4–20 мА ≈ 0–150 °C; дискретный сигнал «клапан открыт»",net:"OT — провода и токовая петля",one:"Нет."}
+];
+const pyr=document.getElementById('pyr'),info=document.getElementById('info');
+L.forEach((l,i)=>{
+  if(l.n===3){const z=document.createElement('div');z.className='zone';z.textContent='граница IT / OT';pyr.appendChild(z)}
+  const b=document.createElement('button');b.className='lvl';b.id='lvl'+l.n;b.style.background='var('+l.bg+')';
+  b.style.marginInline=(i*3)+'%';b.setAttribute('aria-pressed','false');
+  b.innerHTML='<span class="n">L'+l.n+'</span><span><span class="t">'+l.short+'</span><span class="s">'+l.name+'</span></span><span class="time">'+l.time+'</span>';
+  b.onclick=()=>show(l.n);pyr.appendChild(b);
+});
+function show(n){
+  const l=L.find(x=>x.n===n);
+  document.querySelectorAll('.lvl').forEach(e=>e.setAttribute('aria-pressed',e.id==='lvl'+n?'true':'false'));
+  info.innerHTML='<span class="tag">Уровень '+l.n+'</span><h3>'+l.short+' — '+l.name+'</h3><dl>'+
+   '<dt>Что здесь</dt><dd>'+l.what+'</dd><dt>Примеры</dt><dd>'+l.ex+'</dd><dt>Кто работает</dt><dd>'+l.who+'</dd>'+
+   '<dt>Время решений</dt><dd class="c1">'+l.time+'</dd><dt>Какие данные</dt><dd>'+l.data+'</dd><dt>Сеть</dt><dd>'+l.net+'</dd><dt>Где 1С</dt><dd>'+l.one+'</dd></dl>';
+}
+show(3);
+const S={
+ down:[["0 с",4,"1С:ERP: принят заказ 500 шт к 15-му. План производства пересчитан — раз в сутки."],
+       ["+ 1 день",3,"MES: заказ лёг в задание на смену: линия 2, рецепт Б, старт 08:00."],
+       ["+ 1 день 08:00",2,"SCADA: оператор загрузил рецепт, уставка температуры 75 °C ушла в ПЛК."],
+       ["+ 10 мс",1,"ПЛК: следующий цикл прочитал уставку и включил нагрев. Дальше — 100 циклов в секунду."],
+       ["+ 20 мс",0,"Клапан пара открылся, двигатель мешалки разогнался. Процесс пошёл."]],
+ up:[["0 мс",0,"Датчик: температура насоса Н-3 — 86 °C (ток 13,3 мА).",1],
+     ["10 мс",1,"ПЛК: в ближайшем цикле сработала блокировка T > 85 °C → «насос стоп». Ни у кого не спрашивал.",1],
+     ["1 с",2,"SCADA: красная тревога на мнемосхеме, сирена. Оператор квитирует и вызывает механика.",1],
+     ["25 мин",3,"MES: простой линии 2 — 25 мин, причина «перегрев Н-3». План смены сдвинут.",0],
+     ["конец смены",4,"1С:ERP: выпуск за смену 410 из 500 → срок по заказу под угрозой, снабжение видит отчёт утром.",0]]
+};
+let cur=null,step=0;const log=document.getElementById('log'),nx=document.getElementById('next');
+function start(k){cur=S[k];step=0;log.innerHTML='';nx.disabled=false;nx.textContent='Следующий шаг';next()}
+function next(){
+  if(!cur)return;const [t,n,txt,al]=cur[step];
+  const d=document.createElement('div');if(al)d.className='alarm';
+  d.innerHTML='<span class="k">'+t+'</span><span>L'+n+'</span><span>'+txt+'</span>';log.appendChild(d);
+  const e=document.getElementById('lvl'+n);e.classList.remove('pulse');void e.offsetWidth;e.classList.add('pulse');show(n);
+  step++;if(step>=cur.length){nx.disabled=true;nx.textContent='Прогон закончен'}
+}
+document.getElementById('s-down').onclick=()=>start('down');
+document.getElementById('s-up').onclick=()=>start('up');
+nx.onclick=next;
+document.getElementById('reveal').onclick=e=>{const a=document.getElementById('agent');a.hidden=!a.hidden;e.target.textContent=a.hidden?'Показать разбор (после заданий)':'Скрыть разбор'};
+</script>
+</body>
+</html>

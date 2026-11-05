@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>DFD и матрица STRIDE: моделирование угроз</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#f4f6f9; --panel:#ffffff; --ink:#161f2e; --muted:#5c687a; --line:#d7dde7;
+  --accent:#2b5cc4; --accent-soft:#e6eeff; --warn:#b86c00; --warn-soft:#fef4e6;
+  --bad:#c62828; --bad-soft:#fde8e8; --ok:#1e7e46; --ok-soft:#e6f6ee;
+  --purple:#6a3db5; --purple-soft:#f1ebfa;
+  --font-display:"Golos Text", system-ui, sans-serif;
+  --font-mono:"JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f141c; --panel:#171d27; --ink:#e8edf5; --muted:#94a1b3; --line:#293342;
+    --accent:#6894ff; --accent-soft:#1a2846; --warn:#f5ad42; --warn-soft:#382711;
+    --bad:#ff7066; --bad-soft:#3d1a18; --ok:#5cd992; --ok-soft:#143322;
+    --purple:#b088ff; --purple-soft:#2d1e47;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:24px 16px 60px;
+  background:var(--bg); color:var(--ink);
+  font-family:var(--font-display); font-size:15px; line-height:1.55;
+}
+.wrap{max-width:1040px; margin:0 auto; display:grid; gap:24px}
+header{display:grid; gap:8px}
+.eyebrow{font-family:var(--font-mono); font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent)}
+h1{margin:0; font-size:clamp(24px, 3.8vw, 32px); letter-spacing:-.02em}
+.lede{margin:0; color:var(--muted); font-size:16px; max-width:76ch}
+.panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; display:grid; gap:16px}
+
+/* Tabs */
+.tabs{display:flex; gap:8px; border-bottom:1px solid var(--line); padding-bottom:12px}
+.tab-btn{
+  font:inherit; font-size:14px; font-weight:600; padding:8px 16px; border-radius:8px;
+  border:1px solid transparent; background:transparent; color:var(--muted); cursor:pointer;
+  transition:all .15s ease;
+}
+.tab-btn:hover{color:var(--ink); background:var(--accent-soft)}
+.tab-btn.active{color:var(--accent); background:var(--accent-soft); border-color:var(--accent)}
+
+/* DFD canvas */
+.dfd-board{
+  display:grid; gap:14px; background:var(--bg); border:1px solid var(--line);
+  border-radius:10px; padding:18px; position:relative; overflow-x:auto;
+}
+.boundary-box{
+  border:2px dashed var(--bad); border-radius:10px; padding:14px;
+  position:relative; background:rgba(198, 40, 40, 0.03); display:grid; gap:12px;
+}
+.boundary-tag{
+  position:absolute; top:-10px; left:16px; background:var(--bad); color:#fff;
+  font-family:var(--font-mono); font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px;
+}
+
+.nodes-grid{
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px;
+}
+.dfd-node{
+  padding:12px; border-radius:8px; border:2px solid var(--line); background:var(--panel);
+  cursor:pointer; transition:all .2s ease; display:grid; gap:4px; text-align:left;
+  min-width:140px; font:inherit;
+}
+.dfd-node:hover{transform:translateY(-2px); border-color:var(--accent)}
+.dfd-node.selected{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+.dfd-node .badge{font-family:var(--font-mono); font-size:10px; font-weight:600; text-transform:uppercase}
+.dfd-node .title{font-weight:600; font-size:13.5px; color:var(--ink)}
+
+/* Node types */
+.node-entity{border-color:#2b5cc4; border-style:double; border-width:4px}
+.node-process{border-color:#6a3db5; border-radius:20px}
+.node-store{border-color:#1e7e46; border-left-width:6px; border-right-width:6px}
+.node-flow{border-color:#b86c00; border-style:dashed}
+
+/* Flow list */
+.flows-row{display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px}
+.flow-pill{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:8px 12px; border-radius:6px; border:1px solid var(--line);
+  background:var(--panel); font-size:13px; cursor:pointer; font:inherit;
+}
+.flow-pill:hover{border-color:var(--accent)}
+.flow-pill.selected{border-color:var(--accent); background:var(--accent-soft)}
+
+/* Inspector */
+.inspector{
+  display:grid; grid-template-columns:minmax(0, 1.2fr) minmax(0, 1fr); gap:20px;
+  align-items:start;
+}
+@media (max-width:820px){.inspector{grid-template-columns:1fr}}
+
+.threat-card{
+  border:1px solid var(--line); border-radius:8px; padding:12px; display:grid; gap:8px;
+  background:var(--panel);
+}
+.threat-header{display:flex; justify-content:space-between; align-items:center}
+.stride-badge{
+  font-family:var(--font-mono); font-size:11px; font-weight:700; padding:2px 7px;
+  border-radius:4px;
+}
+.badge-S{background:#e3ebfb; color:#1f4ec2}
+.badge-T{background:#fde8e8; color:#b71c1c}
+.badge-R{background:#f1ebfa; color:#5c2db0}
+.badge-I{background:#fef4e6; color:#9c5900}
+.badge-D{background:#ffebe6; color:#c43a18}
+.badge-E{background:#fbe7f5; color:#a11c82}
+
+.threat-desc{font-size:13.5px; color:var(--ink)}
+.threat-mitigation{
+  font-size:13px; color:var(--muted); border-left:3px solid var(--ok);
+  padding-left:8px; margin-top:2px;
+}
+
+.stride-matrix-table{
+  width:100%; border-collapse:collapse; font-size:13px;
+}
+.stride-matrix-table th,.stride-matrix-table td{
+  padding:8px 10px; border:1px solid var(--line); text-align:left;
+}
+.stride-matrix-table th{background:var(--bg); font-weight:600}
+.stride-yes{color:var(--bad); font-weight:700; text-align:center}
+.stride-no{color:var(--muted); text-align:center}
+
+.stat-grid{display:grid; grid-template-columns:repeat(3, 1fr); gap:10px}
+.stat-box{padding:10px; border-radius:8px; background:var(--bg); border:1px solid var(--line); text-align:center}
+.stat-val{font-family:var(--font-mono); font-size:22px; font-weight:700}
+.stat-lbl{font-size:12px; color:var(--muted)}
+
+code{font-family:var(--font-mono); font-size:.9em; background:var(--bg); padding:2px 4px; border-radius:4px}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">0.SEC.01 · Модель угроз · Интерактивное демо</span>
+    <h1>DFD и матрица STRIDE: как моделировать угрозы</h1>
+    <p class="lede">
+      Диаграмма потоков данных (DFD) показывает, куда текут данные и где они пересекают <b>границы доверия</b>. 
+      Методология STRIDE задаёт 6 вопросов к каждому элементу системы.
+    </p>
+  </header>
+
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchSystem('agent')">🤖 Система 1: Агентный полигон «Второй мозг»</button>
+      <button class="tab-btn" onclick="switchSystem('backup')">🏢 Система 2: Служба отчётов о бэкапах</button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-box">
+        <div class="stat-val" id="statElements">6</div>
+        <div class="stat-lbl">Элементов DFD</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-val" id="statBoundaries">2</div>
+        <div class="stat-lbl">Границы доверия</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-val" style="color:var(--bad)" id="statThreats">7</div>
+        <div class="stat-lbl">Ключевых угроз STRIDE</div>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div>
+      <h3 style="margin:0 0 8px; font-size:15px; color:var(--muted)">1. Выбери элемент на диаграмме или поток для анализа:</h3>
+      <div class="dfd-board" id="dfdBoard">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+
+    <!-- Inspector -->
+    <div class="inspector">
+      <!-- Left: Threats for selected item -->
+      <div style="display:grid; gap:12px">
+        <h3 style="margin:0; font-size:16px" id="inspectorTitle">Выбранный элемент</h3>
+        <p style="margin:0; font-size:13.5px; color:var(--muted)" id="inspectorDesc"></p>
+        
+        <div style="display:grid; gap:8px" id="threatsList">
+          <!-- Threats cards -->
+        </div>
+      </div>
+
+      <!-- Right: STRIDE Matrix & Rules -->
+      <div style="display:grid; gap:12px">
+        <h3 style="margin:0; font-size:16px">Правило соответствия DFD ↔ STRIDE</h3>
+        <p style="margin:0; font-size:13px; color:var(--muted)">
+          В классической модели Microsoft и OWASP элементы DFD подвержены только строго определённым угрозам:
+        </p>
+        <table class="stride-matrix-table">
+          <thead>
+            <tr>
+              <th>Элемент DFD</th>
+              <th>S</th><th>T</th><th>R</th><th>I</th><th>D</th><th>E</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr id="row-entity">
+              <td><b>External Entity</b> (Внешняя сущность)</td>
+              <td class="stride-yes">✓</td><td class="stride-no">—</td><td class="stride-yes">✓</td><td class="stride-no">—</td><td class="stride-no">—</td><td class="stride-no">—</td>
+            </tr>
+            <tr id="row-process">
+              <td><b>Process</b> (Процесс / Код)</td>
+              <td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td>
+            </tr>
+            <tr id="row-store">
+              <td><b>Data Store</b> (Хранилище / Файлы)</td>
+              <td class="stride-no">—</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-no">—</td>
+            </tr>
+            <tr id="row-flow">
+              <td><b>Data Flow</b> (Поток данных / Сеть / IPC)</td>
+              <td class="stride-no">—</td><td class="stride-yes">✓</td><td class="stride-no">—</td><td class="stride-yes">✓</td><td class="stride-yes">✓</td><td class="stride-no">—</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; font-size:13px">
+          <b>💡 Главное правило границы:</b><br>
+          Поток внутри одной зоны доверия часто защищён правами ОС. Но как только поток <b>пересекает границу доверия</b> (красный пунктир), угрозы <b>T (подмена)</b>, <b>I (утечка)</b> и <b>D (DoS)</b> становятся критическими.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const systems = {
+  agent: {
+    name: "Агентный полигон «Второй мозг»",
+    elementsCount: 6,
+    boundariesCount: 2,
+    threatsCount: 8,
+    boundaries: [
+      {
+        id: "tb-cloud",
+        title: "ГРАНИЦА ДОВЕРИЯ 1: Локальный ПК ↔ Облачный провайдер (Сеть)",
+        nodes: [
+          { id:"cloud-llm", type:"entity", typeName:"External Entity", name:"Облачная LLM (API)", desc:"Удалённая модель провайдера (Anthropic/OpenAI), принимает контекст, возвращает ответ." }
+        ]
+      },
+      {
+        id: "tb-host",
+        title: "ГРАНИЦА ДОВЕРИЯ 2: Рабочая среда агента ↔ Файловая система (Периметр хранилища)",
+        nodes: [
+          { id:"user", type:"entity", typeName:"External Entity", name:"Пользователь (CLI)", desc:"Инициатор задач, вводит команды через консоль." },
+          { id:"claude-code", type:"process", typeName:"Process", name:"Claude Code (Агент)", desc:"Координатор, генерирует промпты, вызывает MCP-инструменты." },
+          { id:"mcp-server", type:"process", typeName:"Process", name:"Local MCP Server (Python)", desc:"Локальный сервис stdio, валидирует путь, читает файлы из хранилища." },
+          { id:"obsidian-vault", type:"store", typeName:"Data Store", name:"Obsidian Vault (.md файлы)", desc:"Личные заметки, архив статей по подписке, лекции Тьютора." },
+          { id:"env-file", type:"store", typeName:"Data Store", name:".env (Секреты)", desc:"Хранит API_KEY и OBSIDIAN_VAULT_PATH." }
+        ]
+      }
+    ],
+    flows: [
+      { id:"f1", from:"User", to:"Claude Code", name:"f1: Текст запроса", desc:"Пользователь даёт задачу агенту.", cross:"Нет (внутри сессии)" },
+      { id:"f2", from:"Claude Code", to:"MCP Server", name:"f2: JSON-RPC запрос через stdio", desc:"Агент вызывает инструмент read_note(path).", cross:"Граница процессов" },
+      { id:"f3", from:"MCP Server", to:"Obsidian Vault", name:"f3: Чтение файла по пути", desc:"Сервер читает сырой markdown с диска.", cross:"Граница хранилища" },
+      { id:"f4", from:"Obsidian Vault", to:"MCP Server", name:"f4: Текст заметки", desc:"Содержимое заметки возвращается в процесс сервера.", cross:"Граница хранилища" },
+      { id:"f5", from:"MCP Server", to:"Cloud LLM", name:"f5: HTTPS POST (Промпт + Ключ)", desc:"Отправка фрагментов заметок на суммаризацию внешнему провайдеру.", cross:"КРИТИЧНО: Граница ПК ↔ Облако" }
+    ],
+    threats: {
+      "user": [
+        { letter:"S", name:"Spoofing (Подмена)", desc:"Локальный доступ к терминалу другим лицом без пароля.", mit:"Блокировка сессии ОС, биометрия/пароль." }
+      ],
+      "claude-code": [
+        { letter:"T", name:"Tampering (Подмена инструкций)", desc:"Агент попадает под действие Prompt Injection из текста заметки.", mit:"Изоляция системных инструкций, тегирование внешних данных." },
+        { letter:"E", name:"Elevation of Privilege (Рост прав)", desc:"Агент запускает произвольные shell-команды в ОС вместо MCP-вызовов.", mit:"Manual режим, deny-списки, запуск в песочнице." }
+      ],
+      "mcp-server": [
+        { letter:"T", name:"Tampering (Path Traversal)", desc:"Передача rel='../../Windows/win.ini' для чтения файлов вне Vault.", mit:"Строгая валидация: resolve() + is_relative_to()." },
+        { letter:"D", name:"Denial of Service (DoS)", desc:"Запрос на чтение файла 10 ГБ подвешивает процесс сервера.", mit:"Лимит на размер читаемого файла (до 10 МБ)." },
+        { letter:"E", name:"Elevation of Privilege", desc:"MCP-сервер запущен с правами администратора хоста.", mit:"Запуск от имени непривилегированного пользователя." }
+      ],
+      "obsidian-vault": [
+        { letter:"T", name:"Tampering", desc:"Вредоносная статья с скрытой промпт-инъекцией сохранена в хранилище.", mit:"Входной контроль, запрет исполнения динамических команд." },
+        { letter:"I", name:"Information Disclosure", desc:"Чтение конфиденциальных заметок сторонними программами.", mit:"Шифрование диска BitLocker, права NTFS." }
+      ],
+      "env-file": [
+        { letter:"I", name:"Information Disclosure", desc:"Утечка API-ключа: агент-кодер читает .env или коммитит его в git.", mit:".gitignore, добавление в deny-список Claude Code, права 600." }
+      ],
+      "cloud-llm": [
+        { letter:"I", name:"Information Disclosure", desc:"Утечка приватных заметок: провайдер обучается на отправленных данных.", mit:"Zero Data Retention договор, отправка только открытых фрагментов." },
+        { letter:"D", name:"Denial of Service", desc:"Исчерпание API-квоты или слив баланса из-за бесконечного цикла агента.", mit:"Жёсткие лимиты бюджета (Spend Limits) на стороне провайдера." }
+      ],
+      "f5": [
+        { letter:"I", name:"Information Disclosure", desc:"Перехват конфиденциальных данных и API-ключа при передаче в облако.", mit:"Обязательный TLS 1.3 с валидацией сертификатов." },
+        { letter:"T", name:"Tampering (MITM)", desc:"Подмена ответа модели при передаче по сети.", mit:"HTTPS / TLS шифрование канала." }
+      ],
+      "f3": [
+        { letter:"T", name:"Tampering", desc:"Подмена целевого файла через символическую ссылку (symlink) наружу.", mit:"Проверка symlink перед открытием (resolve)." }
+      ]
+    }
+  },
+  backup: {
+    name: "Служба отчётов о бэкапах",
+    elementsCount: 5,
+    boundariesCount: 2,
+    threatsCount: 6,
+    boundaries: [
+      {
+        id: "tb-corp",
+        title: "ГРАНИЦА 1: Локальный сервер (наша территория)",
+        nodes: [
+          { id:"backup-service", type:"entity", typeName:"External Entity", name:"Служба бэкапов", desc:"Пишет строки в журнал бэкапов ночью." },
+          { id:"script", type:"process", typeName:"Process", name:"Скрипт svc-report", desc:"Парсит журнал, считает ошибки, формирует письмо." },
+          { id:"log-file", type:"store", typeName:"Data Store", name:"Журнал бэкапов", desc:"Текстовый лог на сервере." },
+          { id:"cfg-file", type:"store", typeName:"Data Store", name:"config.ini (Пароль почты)", desc:"Хранит логин и пароль сервисного ящика." }
+        ]
+      },
+      {
+        id: "tb-mail",
+        title: "ГРАНИЦА 2: Внешний почтовый сервис ↔ Получатель",
+        nodes: [
+          { id:"mail-server", type:"entity", typeName:"External Entity", name:"Почтовый сервер", desc:"Принимает SMTP, доставляет в ящик." }
+        ]
+      }
+    ],
+    flows: [
+      { id:"fb1", from:"Служба бэкапов", to:"Журнал бэкапов", name:"Запись статуса бэкапа", desc:"Служба пишет результат архивации.", cross:"Нет" },
+      { id:"fb2", from:"Журнал бэкапов", to:"Скрипт svc-report", name:"Чтение строк журнала", desc:"Скрипт вычитывает лог за сутки.", cross:"Нет" },
+      { id:"fb3", from:"Скрипт svc-report", to:"Почтовый сервер", name:"SMTP-отправка письма", desc:"Письмо со сводкой уходит через внешнюю сеть.", cross:"КРИТИЧНО: Граница сервера ↔ Сеть" }
+    ],
+    threats: {
+      "script": [
+        { letter:"E", name:"Elevation of Privilege", desc:"Скрипт запущен под root: уязвимость в парсере даёт полный доступ к серверу.", mit:"Сервисная учётка svc-report с минимальными правами." },
+        { letter:"D", name:"Denial of Service", desc:"Журнал вырос до 50 ГБ, скрипт падает по Out Of Memory.", mit:"Построчное чтение лога, лимит буфера памяти." }
+      ],
+      "cfg-file": [
+        { letter:"I", name:"Information Disclosure", desc:"Пароль почты читают все пользователи сервера (права 777).", mit:"Права NTFS/chmod 600 только для svc-report." }
+      ],
+      "log-file": [
+        { letter:"T", name:"Tampering", desc:"Злоумышленник правит журнал, скрывая сбой бэкапа.", mit:"Append-only права на файл лога." }
+      ],
+      "fb3": [
+        { letter:"S", name:"Spoofing", desc:"Подделка отправителя письма от имени svc-report.", mit:"SMTP-авторизация, SPF, DKIM." },
+        { letter:"I", name:"Information Disclosure", desc:"Перехват письма с именами внутренних серверов.", mit:"STARTTLS / шифрование почтового канала." }
+      ]
+    }
+  }
+};
+
+let currentSystem = 'agent';
+let selectedElement = null;
+
+function switchSystem(sysKey){
+  currentSystem = sysKey;
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', (i===0 && sysKey==='agent') || (i===1 && sysKey==='backup'));
+  });
+  renderBoard();
+  // Select first process by default
+  const firstProc = systems[sysKey].boundaries[0].nodes[0];
+  selectNode(firstProc.id);
+}
+
+function renderBoard(){
+  const sys = systems[currentSystem];
+  document.getElementById('statElements').innerText = sys.elementsCount;
+  document.getElementById('statBoundaries').innerText = sys.boundariesCount;
+  document.getElementById('statThreats').innerText = sys.threatsCount;
+
+  const board = document.getElementById('dfdBoard');
+  board.innerHTML = '';
+
+  sys.boundaries.forEach(b => {
+    const bDiv = document.createElement('div');
+    bDiv.className = 'boundary-box';
+    bDiv.innerHTML = `<span class="boundary-tag">${b.title}</span>`;
+    
+    const grid = document.createElement('div');
+    grid.className = 'nodes-grid';
+    
+    b.nodes.forEach(n => {
+      const btn = document.createElement('button');
+      btn.className = `dfd-node node-${n.type}`;
+      btn.id = `node-btn-${n.id}`;
+      btn.onclick = () => selectNode(n.id);
+      btn.innerHTML = `
+        <span class="badge" style="color:var(--muted)">${n.typeName}</span>
+        <span class="title">${n.name}</span>
+      `;
+      grid.appendChild(btn);
+    });
+
+    bDiv.appendChild(grid);
+    board.appendChild(bDiv);
+  });
+
+  // Flow row
+  const flowHead = document.createElement('div');
+  flowHead.innerHTML = '<span style="font-size:13px; font-weight:600; color:var(--muted)">Потоки данных (Data Flows):</span>';
+  board.appendChild(flowHead);
+
+  const flowsGrid = document.createElement('div');
+  flowsGrid.className = 'flows-row';
+  sys.flows.forEach(f => {
+    const fBtn = document.createElement('button');
+    fBtn.className = 'flow-pill';
+    fBtn.id = `flow-btn-${f.id}`;
+    fBtn.onclick = () => selectFlow(f.id);
+    fBtn.innerHTML = `
+      <span><b>${f.name}</b> <small style="color:var(--muted)">(${f.from} → ${f.to})</small></span>
+      <span style="font-size:11px; color:var(--warn)">${f.cross.includes('КРИТИЧНО') ? '⚠️ Граница' : ''}</span>
+    `;
+    flowsGrid.appendChild(fBtn);
+  });
+  board.appendChild(flowsGrid);
+}
+
+function highlightMatrixRow(type){
+  ['entity', 'process', 'store', 'flow'].forEach(t => {
+    const row = document.getElementById(`row-${t}`);
+    if(row) row.style.background = (t === type) ? 'var(--accent-soft)' : 'transparent';
+  });
+}
+
+function selectNode(nodeId){
+  document.querySelectorAll('.dfd-node, .flow-pill').forEach(el => el.classList.remove('selected'));
+  const btn = document.getElementById(`node-btn-${nodeId}`);
+  if(btn) btn.classList.add('selected');
+
+  const sys = systems[currentSystem];
+  let nodeObj = null;
+  sys.boundaries.forEach(b => {
+    const found = b.nodes.find(n => n.id === nodeId);
+    if(found) nodeObj = found;
+  });
+
+  if(!nodeObj) return;
+  highlightMatrixRow(nodeObj.type);
+
+  document.getElementById('inspectorTitle').innerHTML = `${nodeObj.name} <small style="color:var(--muted); font-size:13px">(${nodeObj.typeName})</small>`;
+  document.getElementById('inspectorDesc').innerText = nodeObj.desc;
+
+  const threats = sys.threats[nodeId] || [];
+  renderThreats(threats);
+}
+
+function selectFlow(flowId){
+  document.querySelectorAll('.dfd-node, .flow-pill').forEach(el => el.classList.remove('selected'));
+  const btn = document.getElementById(`flow-btn-${flowId}`);
+  if(btn) btn.classList.add('selected');
+
+  const sys = systems[currentSystem];
+  const flow = sys.flows.find(f => f.id === flowId);
+  if(!flow) return;
+
+  highlightMatrixRow('flow');
+
+  document.getElementById('inspectorTitle').innerHTML = `${flow.name} <small style="color:var(--muted); font-size:13px">(Data Flow: ${flow.from} → ${flow.to})</small>`;
+  document.getElementById('inspectorDesc').innerHTML = `${flow.desc}<br><b>Пересечение границы:</b> ${flow.cross}`;
+
+  const threats = sys.threats[flowId] || [
+    { letter:"T", name:"Tampering", desc:"Модификация передаваемых данных в канале.", mit:"Шифрование и контроль целостности канала (TLS, HMAC)." },
+    { letter:"I", name:"Information Disclosure", desc:"Прослушивание незашифрованного трафика.", mit:"Шифрование канала связи." },
+    { letter:"D", name:"Denial of Service", desc:"Разрыв соединения или переполнение канала передачи.", mit:"Таймауты, ретраи с backoff, лимиты пропускной способности." }
+  ];
+  renderThreats(threats);
+}
+
+function renderThreats(threats){
+  const container = document.getElementById('threatsList');
+  if(!threats || threats.length === 0){
+    container.innerHTML = '<div style="padding:12px; background:var(--bg); border-radius:8px; color:var(--muted); font-size:13.5px">Для этого элемента нет критических угроз или они не применимы.</div>';
+    return;
+  }
+
+  container.innerHTML = threats.map(t => `
+    <div class="threat-card">
+      <div class="threat-header">
+        <span class="stride-badge badge-${t.letter}">${t.letter} · ${t.name}</span>
+      </div>
+      <div class="threat-desc"><b>Угроза:</b> ${t.desc}</div>
+      <div class="threat-mitigation"><b>🛡 Мера защиты:</b> ${t.mit}</div>
+    </div>
+  `).join('');
+}
+
+// Initial boot
+switchSystem('agent');
+</script>
+
+</body>
+</html>

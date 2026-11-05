@@ -1,0 +1,189 @@
+<meta charset="utf-8">
+<title>Имена и объекты Python</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: «пульт» в одну колонку: выбор сценария → код с текущей строкой → две колонки «имена» и «объекты в памяти» → пояснение шага */
+:root{
+  --bg:#f2f5f7; --panel:#ffffff; --ink:#17222b; --muted:#5a6873; --line:#d3dce2;
+  --accent:#1f6f8b; --accent-soft:#dcedf3; --mut:#a2551b; --mut-soft:#f8e8da; --imm:#3d6b2f; --imm-soft:#e3f0dc; --cur:#fff3c4;
+  --display:"Golos Text","Segoe UI",system-ui,sans-serif; --body:"Golos Text","Segoe UI",system-ui,sans-serif; --mono:"JetBrains Mono",Consolas,"Courier New",monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f161b; --panel:#172129; --ink:#e3eaef; --muted:#97a7b3; --line:#2a3741;
+  --accent:#6cc0dc; --accent-soft:#16303b; --mut:#f0a868; --mut-soft:#3a2716; --imm:#9fd38a; --imm-soft:#1e3318; --cur:#3a3416; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f161b; --panel:#172129; --ink:#e3eaef; --muted:#97a7b3; --line:#2a3741;
+  --accent:#6cc0dc; --accent-soft:#16303b; --mut:#f0a868; --mut-soft:#3a2716; --imm:#9fd38a; --imm-soft:#1e3318; --cur:#3a3416; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 40px}
+.wrap{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-family:var(--display);font-size:1.6rem;margin:0;text-wrap:balance}
+.lead{color:var(--muted);margin:0;max-width:65ch}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tabs button,.ctl button{font:500 .92rem var(--body);border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:8px 12px;cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button:disabled{opacity:.45;cursor:default}
+.locked{border-style:dashed!important;color:var(--muted)!important}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+pre.code{margin:0;font:400 .9rem/1.7 var(--mono);overflow-x:auto}
+.ln{display:block;padding:0 8px;border-radius:4px;white-space:pre}
+.ln.done{color:var(--muted)}
+.ln.now{background:var(--cur);color:var(--ink)}
+.ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ctl .count{color:var(--muted);font:400 .85rem var(--mono);font-variant-numeric:tabular-nums}
+.mem{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:14px}
+@media (max-width:560px){.mem{grid-template-columns:1fr}}
+.colh{font:600 .72rem var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.names,.objs{display:flex;flex-direction:column;gap:8px}
+.name{display:flex;align-items:center;gap:8px;font:600 .95rem var(--mono)}
+.name .arrow{color:var(--muted);font-weight:400}
+.tag{font:600 .78rem var(--mono);padding:2px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.obj{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.obj.m{background:var(--mut-soft)} .obj.i{background:var(--imm-soft)}
+.obj .val{font:600 .95rem var(--mono);word-break:break-word;min-width:0}
+.obj .kind{font:500 .75rem var(--body);color:var(--muted)}
+.obj.flash{outline:2px solid var(--accent)}
+.obj.orphan{opacity:.45}
+.empty{color:var(--muted);font-size:.9rem}
+.note{margin:0;max-width:65ch}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:.85rem;color:var(--muted)}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:5px;border:1px solid var(--line)}
+@media (prefers-reduced-motion:no-preference){.obj{transition:background .2s}}
+</style>
+
+<div class="wrap">
+  <h1>Имена и объекты</h1>
+  <p class="lead">В Python переменная — это ярлык на объекте, а не коробка с значением. Выбери сценарий и жми «Шаг»: слева — имена, справа — объекты в памяти, у каждого свой номер (как <code>id()</code>). Одинаковый номер у двух имён значит, что это один и тот же объект.</p>
+
+  <div class="tabs" role="group" aria-label="Сценарии">
+    <button id="t0" aria-pressed="true">1 · Список и его копия</button>
+    <button id="t1" aria-pressed="false">2 · Строки и числа</button>
+    <button id="t2" aria-pressed="false" class="locked">3 · Значение по умолчанию 🔒 после заданий</button>
+  </div>
+
+  <div class="panel"><pre class="code" id="code"></pre></div>
+
+  <div class="ctl">
+    <button id="step">Шаг ▶</button>
+    <button id="back">◀ Назад</button>
+    <button id="reset">Сначала</button>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="panel mem">
+    <div><p class="colh">Имена</p><div class="names" id="names"></div></div>
+    <div><p class="colh">Объекты в памяти</p><div class="objs" id="objs"></div></div>
+  </div>
+
+  <div class="panel"><p class="note" id="note"></p></div>
+
+  <div class="legend">
+    <span><span class="sw" style="background:var(--mut-soft)"></span>изменяемый объект (list, dict, set) — можно поменять на месте</span>
+    <span><span class="sw" style="background:var(--imm-soft)"></span>неизменяемый (int, str, tuple) — «поменять» = создать новый</span>
+  </div>
+</div>
+
+<script>
+const S = [
+ { code: [
+   'team = ["Аня"]',
+   'crew = team',
+   'crew.append("Борис")',
+   'backup = list(team)',
+   'backup.append("Вера")',
+   'print(team, crew, backup)'
+  ],
+  steps: [
+   st => { st.o[1] = {v:['Аня'], m:true}; st.n.team = 1; return 'Создан список #1, на него повешен ярлык team.'; },
+   st => { st.n.crew = st.n.team; return '= не копирует. crew — второй ярлык на тот же объект #1.'; },
+   st => { st.o[st.n.crew].v.push('Борис'); st.f = st.n.crew; return 'append меняет объект #1 на месте. Его видят оба ярлыка: и team, и crew.'; },
+   st => { st.o[2] = {v:[...st.o[st.n.team].v], m:true}; st.n.backup = 2; return 'list(team) создаёт новый объект #2 с теми же элементами. Так же работают team[:] и team.copy().'; },
+   st => { st.o[2].v.push('Вера'); st.f = 2; return 'Меняем #2 — #1 не трогаем.'; },
+   st => { return 'Вывод: ["Аня", "Борис"] ["Аня", "Борис"] ["Аня", "Борис", "Вера"]. Агент написал crew = team и думает, что сделал копию, — частая причина «странных» багов.'; }
+  ]},
+ { code: [
+   'x = 5',
+   'y = x',
+   'y = y + 1',
+   'name = "агент"',
+   'name.upper()',
+   'loud = name.upper()'
+  ],
+  steps: [
+   st => { st.o[1] = {v:5, m:false}; st.n.x = 1; return 'Объект int #1 со значением 5, ярлык x.'; },
+   st => { st.n.y = 1; return 'y — второй ярлык на тот же #1. Пока всё как со списком.'; },
+   st => { st.o[2] = {v:6, m:false}; st.n.y = 2; return 'int поменять нельзя. y + 1 даёт новый объект #2, ярлык y переезжает на него. x по-прежнему 5.'; },
+   st => { st.o[3] = {v:'"агент"', m:false}; st.n.name = 3; return 'Строка #3 — тоже неизменяемая.'; },
+   st => { st.o[4] = {v:'"АГЕНТ"', m:false, orphan:true}; return 'upper() не меняет строку, а возвращает новую (#4). Ярлыка на неё нет — результат потерян, name всё ещё "агент".'; },
+   st => { st.o[5] = {v:'"АГЕНТ"', m:false}; st.n.loud = 5; return 'Чтобы сохранить результат метода строки, его надо присвоить имени. Без скобок name.upper — это сам метод, а не вызов.'; }
+  ]},
+ { code: [
+   'def add(x, items=[]):',
+   '    items.append(x)',
+   '    return items',
+   'r1 = add(1)',
+   'r2 = add(2)',
+   'r3 = add(3, [])'
+  ],
+  steps: [
+   st => { st.o[1] = {v:[], m:true, label:'по умолчанию у add'}; st.n['add'] = 'f'; return 'def выполняется один раз. Тогда же создаётся список по умолчанию #1 — он живёт вместе с функцией.'; },
+   st => { st.o[1].v.push(1); st.n.r1 = 1; st.f = 1; return 'add(1): items — ярлык на #1, append кладёт 1 туда. r1 указывает на #1.'; },
+   st => { st.o[1].v.push(2); st.n.r2 = 1; st.f = 1; return 'add(2): новый список НЕ создаётся — снова #1. Теперь r1 и r2 оба [1, 2].'; },
+   st => { st.o[2] = {v:[3], m:true}; st.n.r3 = 2; st.f = 2; return 'Передали свой список — работает с ним, #1 не тронут. Исправление: items=None и внутри if items is None: items = [].'; }
+  ]}
+];
+
+let cur = 0, pos = 0, unlocked = false;
+const $ = id => document.getElementById(id);
+
+function replay(){
+  const st = {n:{}, o:{}, f:null}; let msg = 'Нажми «Шаг», чтобы выполнить первую строку.';
+  for (let i = 0; i < pos; i++){ st.f = null; msg = S[cur].steps[i](st); }
+  return {st, msg};
+}
+function fmt(o){ return Array.isArray(o.v) ? '[' + o.v.map(x => typeof x === 'string' ? '"' + x + '"' : x).join(', ') + ']' : String(o.v); }
+function render(){
+  const sc = S[cur], {st, msg} = replay();
+  const lines = sc.code.map((t, i) => {
+    const execIdx = cur === 2 ? [0,1,2,3,4,5] : null;
+    const cls = i < pos - 1 ? 'done' : (i === pos - 1 ? 'now' : '');
+    return '<span class="ln ' + cls + '">' + t.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+  });
+  // для сценария 3 подсветка идёт по шагам, а не по строкам
+  if (cur === 2){
+    const map = [[0,1,2],[3,1],[4,1],[5,1]];
+    const done = new Set(), now = new Set();
+    map.slice(0, Math.max(0,pos-1)).flat().forEach(i => done.add(i));
+    if (pos > 0) map[pos-1].forEach(i => now.add(i));
+    $('code').innerHTML = sc.code.map((t,i) => '<span class="ln ' + (now.has(i)?'now':done.has(i)?'done':'') + '">' + t.replace(/</g,'&lt;') + '</span>').join('');
+  } else $('code').innerHTML = lines.join('');
+  const names = Object.entries(st.n).filter(([k,v]) => v !== 'f');
+  $('names').innerHTML = names.length ? names.map(([k,v]) => '<div class="name">' + k + '<span class="arrow">→</span><span class="tag">#' + v + '</span></div>').join('')
+    + (st.n.add ? '<div class="name">add<span class="arrow">→</span><span class="tag">функция</span></div>' : '')
+    : (st.n.add ? '<div class="name">add<span class="arrow">→</span><span class="tag">функция</span></div>' : '<div class="empty">пока пусто</div>');
+  const ids = Object.keys(st.o);
+  $('objs').innerHTML = ids.length ? ids.map(id => { const o = st.o[id];
+    return '<div class="obj ' + (o.m?'m':'i') + (String(st.f)===id?' flash':'') + (o.orphan?' orphan':'') + '"><span class="tag">#' + id + '</span><span class="val">' + fmt(o) + '</span><span class="kind">' + (Array.isArray(o.v)?'list':typeof o.v==='number'?'int':'str') + (o.label?' · '+o.label:'') + (o.orphan?' · без ярлыка':'') + '</span></div>'; }).join('')
+    : '<div class="empty">пока пусто</div>';
+  $('note').textContent = msg;
+  $('count').textContent = 'шаг ' + pos + ' из ' + sc.steps.length;
+  $('step').disabled = pos >= sc.steps.length; $('back').disabled = pos === 0;
+}
+function pick(i){
+  if (i === 2 && !unlocked){
+    $('note').textContent = 'Этот сценарий — разбор задания 4. Открой его после того, как ответишь в файле сессии: нажми кнопку ещё раз.';
+    unlocked = true; $('t2').textContent = '3 · Значение по умолчанию — нажми ещё раз'; return;
+  }
+  cur = i; pos = 0;
+  [0,1,2].forEach(k => $('t'+k).setAttribute('aria-pressed', String(k === i)));
+  if (i === 2){ $('t2').classList.remove('locked'); $('t2').textContent = '3 · Значение по умолчанию'; }
+  render();
+}
+$('t0').onclick = () => pick(0); $('t1').onclick = () => pick(1); $('t2').onclick = () => pick(2);
+$('step').onclick = () => { pos++; render(); };
+$('back').onclick = () => { pos--; render(); };
+$('reset').onclick = () => { pos = 0; render(); };
+render();
+</script>
