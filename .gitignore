@@ -19,3 +19,9 @@ desktop.ini
 # Python
 __pycache__/
 *.pyc
+
+# Базы, которые создают учебные скрипты (пересоздаются при запуске)
+*.sqlite
+*.duckdb
+*.duckdb.wal
+bank.db

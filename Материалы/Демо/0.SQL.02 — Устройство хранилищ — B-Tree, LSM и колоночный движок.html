@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>0.SQL.02 — Устройство хранилищ: Slotted-Page, LSM и Колоночный движок</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --code-bg: #090d13;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+    header {
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+    h1 {
+      font-size: 22px;
+      color: #f0f6fc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .badge {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: rgba(88, 166, 255, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(88, 166, 255, 0.3);
+    }
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-top: 6px;
+    }
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+    }
+    .tab-btn.active {
+      background: var(--card);
+      border-color: var(--border);
+      color: var(--accent);
+      border-bottom: 2px solid var(--accent);
+    }
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.2s ease-in-out;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    h2 {
+      font-size: 16px;
+      color: #f0f6fc;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    button.btn {
+      background: #238636;
+      color: #ffffff;
+      border: 1px solid rgba(240, 246, 252, 0.1);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    button.btn:hover { background: #2ea043; }
+    button.btn-sec {
+      background: #21262d;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    button.btn-sec:hover { background: #30363d; }
+    button.btn-danger { background: #da3633; }
+    button.btn-danger:hover { background: #f85149; }
+
+    /* Slotted Page Visuals */
+    .page-box {
+      border: 2px solid var(--border);
+      background: #090d13;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .page-header-bar {
+      background: rgba(88, 166, 255, 0.15);
+      border: 1px solid var(--accent);
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      color: var(--accent);
+      font-weight: bold;
+    }
+    .page-body-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .slot-array, .tuple-area {
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 220px;
+    }
+    .slot-item {
+      background: rgba(210, 153, 34, 0.15);
+      border: 1px solid var(--yellow);
+      color: var(--yellow);
+      padding: 6px 10px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .tuple-item {
+      background: rgba(63, 185, 80, 0.15);
+      border: 1px solid var(--green);
+      color: var(--green);
+      padding: 6px 10px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .free-space-bar {
+      text-align: center;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px dotted var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      margin: 12px 0;
+    }
+
+    /* LSM Visuals */
+    .lsm-layout {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 20px;
+    }
+    .ram-section, .disk-section {
+      background: #090d13;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+    .section-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .sstable-card {
+      background: #161b22;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--purple);
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 10px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    /* Row vs Col Visuals */
+    .bench-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 16px;
+    }
+    .metric-card {
+      background: #090d13;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+    .metric-val {
+      font-size: 26px;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin: 8px 0;
+    }
+    .bar-wrap {
+      height: 12px;
+      background: #21262d;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .bar-fill {
+      height: 100%;
+      transition: width 0.4s ease;
+    }
+
+    .info-callout {
+      background: rgba(88, 166, 255, 0.08);
+      border-left: 3px solid var(--accent);
+      padding: 12px 16px;
+      border-radius: 0 6px 6px 0;
+      font-size: 13px;
+      color: #c9d1d9;
+      margin-top: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>
+      <span>Устройство хранилищ: B-Tree, LSM и Колоночный движок</span>
+      <span class="badge">0.SQL.02</span>
+    </h1>
+    <p class="subtitle">Интерактивный тренажёр механизмов хранения данных на диске и в памяти (CMU 15-445 & Martin Kleppmann DDIA)</p>
+  </header>
+
+  <div class="nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('slotted')">1. Slotted-Page (B-Tree)</button>
+    <button class="tab-btn" onclick="switchTab('lsm')">2. LSM-Tree & Compaction</button>
+    <button class="tab-btn" onclick="switchTab('rowcol')">3. Строки vs Колонки (Бенчмарк)</button>
+  </div>
+
+  <!-- TAB 1: SLOTTED PAGE -->
+  <div id="slotted" class="tab-content active">
+    <div class="card">
+      <h2>Страничная архитектура (PostgreSQL, SQLite, MySQL InnoDB)</h2>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+        В реляционных СУБД файл базы разбит на страницы фикс. размера (обычно 8 КБ). Внутри страницы используется архитектура <b>Slotted-Page</b>.
+        Слот-массив растёт <b>сверху вниз</b>, а кортежи данных пишутся <b>снизу вверх</b>. Указатель на кортеж (RID) — это <code>(page_id, slot_number)</code>.
+      </p>
+
+      <div class="controls">
+        <button class="btn" onclick="insertTuple()">+ Вставить запись (INSERT)</button>
+        <button class="btn btn-sec" onclick="updateRandomTuple()">✏️ Обновить запись (UPDATE)</button>
+        <button class="btn btn-danger" onclick="resetPage()">Сброс страницы</button>
+      </div>
+
+      <div class="page-box">
+        <div class="page-header-bar">
+          <span>PAGE #42 [Заголовок страницы: LSN = 1042 | Free Space: <span id="free-bytes">6800</span> байт]</span>
+          <span>Размер страницы: 8192 байта (8 КБ)</span>
+        </div>
+
+        <div class="page-body-grid">
+          <div>
+            <div style="font-weight:600; color:var(--yellow); margin-bottom:6px;">Слот-массив (растёт ⬇️):</div>
+            <div id="slot-list" class="slot-array">
+              <!-- Slotted items injected here -->
+            </div>
+          </div>
+          <div>
+            <div style="font-weight:600; color:var(--green); margin-bottom:6px;">Область кортежей данных (растёт ⬆️):</div>
+            <div id="tuple-list" class="tuple-area">
+              <!-- Tuple items injected here -->
+            </div>
+          </div>
+        </div>
+
+        <div class="free-space-bar" id="free-space-visual">
+          ⇄ Свободное пространство страницы (между массивом слотов и данными кортежей) ⇄
+        </div>
+      </div>
+
+      <div class="info-callout">
+        <b>💡 Почему это гениально:</b> Внешний индекс (B-Tree) хранит адрес записи как <code>Slot ID</code>, а не смещение байта на диске. Если запись изменила размер и сдвинулась внутри страницы — индекс снаружи <b>не меняется</b>, меняется только смещение внутри слота!
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: LSM-TREE -->
+  <div id="lsm" class="tab-content">
+    <div class="card">
+      <h2>LSM-Tree: быстрая запись и сброс на диск (RocksDB, Cassandra)</h2>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+        В LSM запись всегда последовательна: сначала пишется в <b>WAL</b> (диск) и в <b>MemTable</b> (в памяти, SkipList). При заполнении порога MemTable сбрасывается в неизменяемый <b>SSTable</b> на диске. Фоновый процесс сливает файлы через Merge-Sort.
+      </p>
+
+      <div class="controls">
+        <button class="btn" onclick="lsmWrite()">+ Записать ключ (Write key-value)</button>
+        <button class="btn btn-sec" onclick="lsmCompact()">🔄 Запустить Compaction (Слияние)</button>
+        <button class="btn btn-danger" onclick="lsmReset()">Сброс</button>
+      </div>
+
+      <div class="lsm-layout">
+        <div class="ram-section">
+          <div class="section-title">
+            <span>Оперативная память (RAM)</span>
+            <span class="badge" id="memtable-badge">0 / 4 записей</span>
+          </div>
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">MemTable (отсортированное дерево):</div>
+          <div id="memtable-list" style="font-family:monospace; font-size:12px; min-height:160px; background:#161b22; border:1px solid var(--border); border-radius:4px; padding:10px;">
+            <em style="color:#6e7681;">Пока пусто. Нажмите «Записать ключ»...</em>
+          </div>
+        </div>
+
+        <div class="disk-section">
+          <div class="section-title">
+            <span>Диск (Неизменяемые SSTable файлы)</span>
+            <span class="badge" id="sstable-count">Файлов: 0</span>
+          </div>
+          <div id="sstable-container" style="min-height:160px;">
+            <em style="color:#6e7681; font-size:12px;">SSTable сегментов на диске пока нет. При 4 записях MemTable сбросится сюда.</em>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-callout">
+        <b>💡 Фильтр Блума (Bloom Filter):</b> Чтобы при поиске несуществующего ключа не читать 20 файлов с диска, каждый SSTable держит компактный фильтр Блума в RAM. Он мгновенно говорит: <i>«Ключа ТОЧНО нет в этом файле»</i> (0 I/O на диск).
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: ROW VS COL -->
+  <div id="rowcol" class="tab-content">
+    <div class="card">
+      <h2>Строковое хранение vs Колоночное (OLTP vs OLAP)</h2>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+        Журнал на <b>300 000 вызовов LLM</b> (11 колонок: id, дата, модель, токены, цена, latency, статус, prompt, response).
+        Попробуйте выполнить два разных типа аналитических запросов.
+      </p>
+
+      <div class="controls">
+        <button class="btn" onclick="runBenchmark('aggregate')">📊 Запрос Агрегации: avg(cost_rub) GROUP BY day</button>
+        <button class="btn btn-sec" onclick="runBenchmark('lookup')">🔍 Точечный поиск: SELECT * WHERE id = 123456</button>
+      </div>
+
+      <div class="bench-grid">
+        <div class="metric-card">
+          <div style="font-weight:600; color:var(--yellow);">Строковая база (SQLite / PostgreSQL)</div>
+          <div style="font-size:12px; color:var(--text-muted);">Хранит данные целыми строками по 8 КБ страницам</div>
+          <div class="metric-val" id="sqlite-time">184.5 мс</div>
+          <div style="font-size:12px; color:var(--text-muted);" id="sqlite-bytes">Прочитано с диска: ~198.4 МБ</div>
+          <div class="bar-wrap">
+            <div id="sqlite-bar" class="bar-fill" style="width: 100%; background: var(--yellow);"></div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div style="font-weight:600; color:var(--accent);">Колоночная база (DuckDB / ClickHouse)</div>
+          <div style="font-size:12px; color:var(--text-muted);">Хранит каждую колонку в отдельном сжатом векторе</div>
+          <div class="metric-val" id="duck-time">5.2 мс</div>
+          <div style="font-size:12px; color:var(--text-muted);" id="duck-bytes">Прочитано с диска: ~3.8 МБ</div>
+          <div class="bar-wrap">
+            <div id="duck-bar" class="bar-fill" style="width: 3%; background: var(--accent);"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-callout" id="bench-explanation">
+        <b>💡 Что произошло:</b> В запросе агрегации DuckDB прочитал только 2 колонки (<code>day</code> и <code>cost_rub</code>), полностью проигнорировав тяжёлые строки <code>prompt</code> и <code>response</code>. SQLite был вынужден поднять с диска все 200 МБ таблицы, чтобы достать 2 числа из каждой строки.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+  }
+
+  // --- TAB 1: SLOTTED PAGE LOGIC ---
+  let slotCount = 0;
+  let freeBytes = 8192 - 64; // header overhead
+
+  function insertTuple() {
+    if (freeBytes < 250) {
+      alert("Страница заполнена! Места для новых кортежей нет (Free space < 250 B). Требуется аллокация новой B-Tree страницы.");
+      return;
+    }
+    slotCount++;
+    const tupleSize = Math.floor(Math.random() * 80) + 120; // 120-200 bytes
+    freeBytes -= (tupleSize + 8); // tuple bytes + 8 bytes slot entry
+
+    const slotList = document.getElementById('slot-list');
+    const tupleList = document.getElementById('tuple-list');
+
+    const s = document.createElement('div');
+    s.className = 'slot-item';
+    s.id = `slot-${slotCount}`;
+    s.innerHTML = `<span>Slot #${slotCount}</span> <span>Offset: ${8192 - (slotCount * 180)} | Len: ${tupleSize} B</span>`;
+    slotList.appendChild(s);
+
+    const t = document.createElement('div');
+    t.className = 'tuple-item';
+    t.id = `tuple-${slotCount}`;
+    t.innerHTML = `<span>Кортеж #${slotCount}</span> <span style="font-size:11px; color:#8b949e;">[id=${1000 + slotCount}, status="ok", cost=${(Math.random()*5).toFixed(2)}]</span>`;
+    tupleList.insertBefore(t, tupleList.firstChild);
+
+    document.getElementById('free-bytes').textContent = freeBytes;
+  }
+
+  function updateRandomTuple() {
+    if (slotCount === 0) {
+      alert("Сначала вставьте хотя бы одну запись!");
+      return;
+    }
+    const idx = Math.floor(Math.random() * slotCount) + 1;
+    const targetSlot = document.getElementById(`slot-${idx}`);
+    const targetTuple = document.getElementById(`tuple-${idx}`);
+    if (targetSlot && targetTuple) {
+      targetTuple.style.background = 'rgba(210, 153, 34, 0.3)';
+      targetTuple.innerHTML = `<span>Кортеж #${idx} (ОБНОВЛЁН)</span> <span style="font-size:11px; color:var(--yellow);">[id=${1000 + idx}, status="UPDATED"]</span>`;
+      setTimeout(() => { targetTuple.style.background = 'rgba(63, 185, 80, 0.15)'; }, 600);
+    }
+  }
+
+  function resetPage() {
+    slotCount = 0;
+    freeBytes = 8192 - 64;
+    document.getElementById('slot-list').innerHTML = '';
+    document.getElementById('tuple-list').innerHTML = '';
+    document.getElementById('free-bytes').textContent = freeBytes;
+  }
+
+  // Init page with 2 tuples
+  insertTuple();
+  insertTuple();
+
+  // --- TAB 2: LSM LOGIC ---
+  let memEntries = [];
+  let sstableCount = 0;
+  const mockKeys = ["user:101", "user:102", "model:gpt4", "call:992", "token:count", "session:a1", "config:max"];
+
+  function lsmWrite() {
+    const k = mockKeys[Math.floor(Math.random() * mockKeys.length)];
+    const v = Math.floor(Math.random() * 900) + 100;
+    memEntries.push({ key: k, val: v });
+    memEntries.sort((a, b) => a.key.localeCompare(b.key));
+
+    renderMemTable();
+
+    if (memEntries.length >= 4) {
+      setTimeout(flushMemTable, 400);
+    }
+  }
+
+  function renderMemTable() {
+    const box = document.getElementById('memtable-list');
+    document.getElementById('memtable-badge').textContent = `${memEntries.length} / 4 записей`;
+    if (memEntries.length === 0) {
+      box.innerHTML = `<em style="color:#6e7681;">MemTable сброшена на диск. Ждём новых записей...</em>`;
+      return;
+    }
+    box.innerHTML = memEntries.map(e => `<div>🔑 <b>${e.key}</b> ➔ <code>${e.val}</code></div>`).join('');
+  }
+
+  function flushMemTable() {
+    sstableCount++;
+    const sstableContainer = document.getElementById('sstable-container');
+    if (sstableCount === 1) sstableContainer.innerHTML = '';
+
+    const card = document.createElement('div');
+    card.className = 'sstable-card';
+    card.innerHTML = `
+      <div style="color:var(--purple); font-weight:bold; margin-bottom:4px;">📄 SSTable_L0_${sstableCount}.db (Неизменяемый)</div>
+      <div style="color:var(--text-muted); font-size:11px;">Ключи: ${memEntries.map(e => e.key).join(', ')}</div>
+      <div style="color:var(--green); font-size:11px; margin-top:3px;">✓ Bloom Filter сгенерирован</div>
+    `;
+    sstableContainer.insertBefore(card, sstableContainer.firstChild);
+    document.getElementById('sstable-count').textContent = `Файлов: ${sstableCount}`;
+
+    memEntries = [];
+    renderMemTable();
+  }
+
+  function lsmCompact() {
+    const sstableContainer = document.getElementById('sstable-container');
+    if (sstableCount < 2) {
+      alert("Для Compaction нужно хотя бы 2 SSTable файла на диске!");
+      return;
+    }
+    sstableContainer.innerHTML = `
+      <div class="sstable-card" style="border-left-color: var(--green);">
+        <div style="color:var(--green); font-weight:bold; margin-bottom:4px;">📦 SSTable_L1_merged.db (Compacted & Deduplicated)</div>
+        <div style="color:var(--text-muted); font-size:11px;">Все L0 файлы слиты методом Merge-Sort. Дубликаты старых версий удалены.</div>
+      </div>
+    `;
+    sstableCount = 1;
+    document.getElementById('sstable-count').textContent = `Файлов: 1 (L1)`;
+  }
+
+  function lsmReset() {
+    memEntries = [];
+    sstableCount = 0;
+    renderMemTable();
+    document.getElementById('sstable-container').innerHTML = `<em style="color:#6e7681; font-size:12px;">SSTable сегментов на диске пока нет. При 4 записях MemTable сбросится сюда.</em>`;
+    document.getElementById('sstable-count').textContent = `Файлов: 0`;
+  }
+
+  // --- TAB 3: BENCHMARK LOGIC ---
+  function runBenchmark(type) {
+    const exp = document.getElementById('bench-explanation');
+    if (type === 'aggregate') {
+      document.getElementById('sqlite-time').textContent = '184.5 мс';
+      document.getElementById('sqlite-bytes').textContent = 'Прочитано с диска: ~198.4 МБ (100% таблицы)';
+      document.getElementById('sqlite-bar').style.width = '100%';
+
+      document.getElementById('duck-time').textContent = '5.2 мс (в ~35 раз быстрее!)';
+      document.getElementById('duck-bytes').textContent = 'Прочитано с диска: ~3.8 МБ (2 колонки)';
+      document.getElementById('duck-bar').style.width = '4%';
+
+      exp.innerHTML = `<b>💡 Что произошло (Агрегация):</b> DuckDB прочитал только 2 колонки (<code>day</code> и <code>cost_rub</code>) в виде плотных векторов. SQLite был вынужден поднять с диска все 200 МБ файла, потому что данные лежат строками вперемешку с <code>prompt</code> и <code>response</code>.`;
+    } else {
+      document.getElementById('sqlite-time').textContent = '0.08 мс (быстрее!)';
+      document.getElementById('sqlite-bytes').textContent = 'Прочитано с диска: ~8 КБ (1 страница по B-Tree)';
+      document.getElementById('sqlite-bar').style.width = '3%';
+
+      document.getElementById('duck-time').textContent = '1.85 мс';
+      document.getElementById('duck-bytes').textContent = 'Прочитано: собирал запись из 11 разных колонок';
+      document.getElementById('duck-bar').style.width = '75%';
+
+      exp.innerHTML = `<b>💡 Что произошло (Поиск одной строки по ключу):</b> SQLite мгновенно нашёл 1 страницу в B-Tree по индексу <code>id</code> и прочитал все поля одной операцией. DuckDB был вынужден прыгать по 11 разным колоночным файлам, чтобы составить из них одну строку. Для точечных транзакций строковые базы выигрывают!`;
+    }
+  }
+</script>
+</body>
+</html>
