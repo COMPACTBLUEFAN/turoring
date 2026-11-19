@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0.SND.01 — От сэмпла и DSP до AI в звуке</title>
+<!--
+ДИЗАЙН-БРИФ (Шаблоны/Демо.md):
+Ага:            после демо пользователь увидит (и услышит), как один и тот же цифровой сигнал при нарушении
+                Найквиста рождает фантомные частоты, почему глобальной АЧХ недостаточно для тембра и как
+                классический DSP (буфер, компрессор, синтез, кодек) напрямую задаёт границы AI-пайплайна (связь с заданием 2).
+Метафора:       инженерный аудио-стенд (осциллограф + анализатор спектра + конвейер обработки звука).
+Главный элемент: интерактивный блок осциллографа/спектра и конвейер «WAV 48 кГц → Ресэмплинг → Кодек → Мел/Вокодер → AI».
+Отклик:         живые Canvas-графики (< 50 мс) + Web Audio API синтез (опциональный звук) + подсветка узлов конвейера.
+Финал:          экран «Итог миссии» со счётчиком предсказаний, числовыми выводами и закрытым разбором «после заданий».
+-->
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef1f5;
+    --border: #d5dce4;
+    --text: #18202c;
+    --muted: #526072;
+    --accent: #0f766e;
+    --accent-soft: rgba(15, 118, 110, 0.12);
+    --warn: #b45309;
+    --warn-soft: rgba(180, 83, 9, 0.12);
+    --danger: #be123c;
+    --danger-soft: rgba(190, 18, 60, 0.12);
+    --ok: #15803d;
+    --ok-soft: rgba(21, 128, 61, 0.12);
+    --canvas-bg: #11161d;
+    --canvas-grid: #243040;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+
+  [data-theme="dark"] {
+    --bg: #0d1117;
+    --surface: #151b23;
+    --surface-2: #1c2430;
+    --border: #2b3647;
+    --text: #e6edf3;
+    --muted: #93a3b8;
+    --accent: #2dd4bf;
+    --accent-soft: rgba(45, 212, 191, 0.14);
+    --warn: #f59e0b;
+    --warn-soft: rgba(245, 158, 11, 0.15);
+    --danger: #fb7185;
+    --danger-soft: rgba(251, 113, 133, 0.15);
+    --ok: #4ade80;
+    --ok-soft: rgba(74, 222, 128, 0.14);
+    --canvas-bg: #090d12;
+    --canvas-grid: #1e2938;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.5;
+    overflow-x: hidden;
+  }
+
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  h1 {
+    margin: 0 0 6px 0;
+    font-size: clamp(19px, 3vw, 24px);
+    line-height: 1.25;
+  }
+
+  .aha {
+    margin: 0;
+    font-size: 14px;
+    color: var(--muted);
+    max-width: 720px;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  button, select {
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent);
+    color: #061314;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  button.primary:hover:not(:disabled) {
+    filter: brightness(1.06);
+    background: var(--accent);
+  }
+
+  /* Трекер ступеней */
+  .stepper {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 640px) {
+    .stepper { grid-template-columns: repeat(2, 1fr); }
+  }
+  .step-pill {
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 11px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .step-pill.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .step-pill.done {
+    border-color: var(--ok);
+  }
+  .step-pill .s-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .step-pill .s-name {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+
+  .card h2 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+  }
+
+  .card h3 {
+    margin: 12px 0 6px 0;
+    font-size: 15px;
+  }
+
+  .note-edu {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--surface-2);
+    border-left: 3px solid var(--accent);
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin: 8px 0 12px 0;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  @media (max-width: 780px) {
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+
+  canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    background: var(--canvas-bg);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .ctrl-row {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .ctrl-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .mono { font-family: var(--mono); }
+  .val-chip {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-weight: 600;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  .toggle-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 10px;
+  }
+  @media (max-width: 520px) {
+    .kpi-strip { grid-template-columns: 1fr; }
+  }
+  .kpi {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 11px;
+  }
+  .kpi .k-lbl { font-size: 11px; color: var(--muted); }
+  .kpi .k-val { font-family: var(--mono); font-size: 16px; font-weight: 700; margin-top: 2px; }
+  .kpi.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .kpi.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .kpi.danger { border-color: var(--danger); background: var(--danger-soft); }
+
+  /* Предсказание */
+  .predict-box {
+    border: 1px dashed var(--accent);
+    background: var(--accent-soft);
+    border-radius: 11px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+  }
+  .predict-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .predict-opts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .feedback {
+    margin-top: 10px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+  }
+  .feedback.show { display: block; }
+  .feedback.ok { background: var(--ok-soft); border: 1px solid var(--ok); }
+  .feedback.bad { background: var(--danger-soft); border: 1px solid var(--danger); }
+
+  /* Конвейер ступени 3 */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin: 12px 0;
+  }
+  @media (max-width: 720px) {
+    .pipeline { grid-template-columns: 1fr; }
+  }
+  .node {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    position: relative;
+    transition: border-color 0.25s ease, background 0.25s ease;
+  }
+  .node .n-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .node .n-sub { font-size: 12px; color: var(--muted); }
+  .node.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .node.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .node.danger { border-color: var(--danger); background: var(--danger-soft); }
+
+  .mission-box {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 13px;
+    margin-top: 12px;
+    font-size: 13px;
+  }
+
+  .hidden { display: none !important; }
+
+  .spoiler-panel {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .footer-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body data-theme="dark">
+<div class="wrap">
+  <header>
+    <div>
+      <span class="badge">0.SND.01 · Интерактивный стенд</span>
+      <h1>От сэмпла и классического DSP — к AI в звуке</h1>
+      <p class="aha">После этого стенда ты увидишь и услышишь: как нарушение Найквиста рождает фантомный тон, почему глобальная АЧХ не передаёт тембр и какие именно операции ломают AI-пайплайн анализа и генерации звука.</p>
+    </div>
+    <div class="header-actions">
+      <button id="themeBtn" type="button" title="Переключить светлую/тёмную тему">☀️ Светлая тема</button>
+      <button id="muteBtn" type="button" title="Включить или выключить звук Web Audio">🔊 Звук: вкл</button>
+    </div>
+  </header>
+
+  <nav class="stepper" aria-label="Ступени стенда">
+    <button class="step-pill active" data-step="1" type="button">
+      <span class="s-num">Ступень 1 · Разминка</span>
+      <span class="s-name">Найквист, алиасинг, дизеринг</span>
+    </button>
+    <button class="step-pill" data-step="2" type="button">
+      <span class="s-num">Ступень 2 · Основной</span>
+      <span class="s-name">Синтез, компрессор, буфер DAW</span>
+    </button>
+    <button class="step-pill" data-step="3" type="button">
+      <span class="s-num">Ступень 3 · Злой случай</span>
+      <span class="s-name">🗡 Сломай и почини AI-тракт</span>
+    </button>
+    <button class="step-pill" data-step="4" type="button">
+      <span class="s-num">Финал</span>
+      <span class="s-name">Итог миссии</span>
+    </button>
+  </nav>
+
+  <!-- ==================== СТУПЕНЬ 1 ==================== -->
+  <section id="step-1" class="card">
+    <h2>Ступень 1. Сигнал в массиве: Найквист, алиасинг и дизеринг</h2>
+    <div class="note-edu">
+      <strong>Учебный стенд:</strong> формула сворачивания алиасинга точная (<code>f_alias = |f − round(f / fs)·fs|</code>); осциллограф показывает окно 2 мс. Кнопка «Прослушать» синтезирует реальный звук через Web Audio API.
+    </div>
+
+    <div class="predict-box" id="pred1-box">
+      <div class="predict-title">🔮 Предскажи, потом смотри (#1)</div>
+      <div>На вход ресэмплера идёт чистый тон <strong>6 500 Гц</strong>. Мы переводим его в частоту дискретизации <strong>8 000 Гц</strong> (Найквист = 4 000 Гц), просто прореживая сэмплы <em>без антиалиасингового фильтра (LPF)</em>. Что окажется в выходном сигнале?</div>
+      <div class="predict-opts">
+        <button type="button" data-p="1" data-ans="stay">Останется тон 6 500 Гц, только тише</button>
+        <button type="button" data-p="1" data-ans="gone">Сигнал исчезнет (станет тишиной)</button>
+        <button type="button" data-p="1" data-ans="fold">Появится фантомный тон 1 500 Гц</button>
+      </div>
+      <div class="feedback" id="pred1-fb"></div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <canvas id="aliasCanvas" width="580" height="270" aria-label="Осциллограф алиасинга и квантования"></canvas>
+        <div class="kpi-strip">
+          <div class="kpi" id="kpi-nyq">
+            <div class="k-lbl">Предел Найквиста (fs / 2)</div>
+            <div class="k-val" id="val-nyq">8 000 Гц</div>
+          </div>
+          <div class="kpi" id="kpi-alias">
+            <div class="k-lbl">Что реально слышно / видно</div>
+            <div class="k-val" id="val-alias">1 500 Гц</div>
+          </div>
+          <div class="kpi" id="kpi-q">
+            <div class="k-lbl">Квантование</div>
+            <div class="k-val" id="val-q">24 бит (чисто)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="ctrl-row">
+          <div class="ctrl-head">
+            <label for="freqSlider">Частота входного тона (f)</label>
+            <span class="val-chip" id="freqLabel">1 500 Гц</span>
+          </div>
+          <input id="freqSlider" type="range" min="500" max="12000" step="250" value="1500">
+        </div>
+
+        <div class="ctrl-row">
+          <div class="ctrl-head">
+            <label for="srSelect">Частота дискретизации (fs)</label>
+            <span class="val-chip" id="srLabel">16 000 Гц</span>
+          </div>
+          <select id="srSelect" style="width:100%">
+            <option value="8000">8 000 Гц (телефония, Найквист 4 кГц)</option>
+            <option value="16000" selected>16 000 Гц (стандарт ASR / Whisper, Найквист 8 кГц)</option>
+            <option value="24000">24 000 Гц (нейрокодеки DAC/EnCodec, Найквист 12 кГц)</option>
+          </select>
+        </div>
+
+        <div class="ctrl-row">
+          <div class="ctrl-head">
+            <span>Антиалиасинг и разрядность</span>
+          </div>
+          <div class="toggle-row">
+            <button type="button" id="lpfBtn">LPF перед прореживанием: ВЫКЛ</button>
+            <button type="button" id="bitsBtn">Разрядность: 24 бит</button>
+            <button type="button" id="ditherBtn" disabled>TPDF-дизеринг: ВЫКЛ</button>
+          </div>
+        </div>
+
+        <div class="ctrl-row">
+          <div class="toggle-row">
+            <button type="button" class="primary" id="playAliasBtn">▶ Прослушать результат (0.6 с)</button>
+            <button type="button" id="presetAliasBtn">Сценарий из #1 (6 500 Гц → 8 кГц)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mission-box" id="m1-status">
+      🎯 <strong>Миссия ступени 1:</strong> выстави <code>fs = 16 000 Гц</code> (стандарт речевого ASR) с выключенным LPF и сдвинь <code>f</code> выше Найквиста — посмотри, на какую фантомную частоту свернётся входной тон <strong>10 000 Гц</strong>, затем включи LPF и посмотри, что изменилось. Запомни число — оно пригодится в финале.
+    </div>
+
+    <div class="footer-nav">
+      <span></span>
+      <button type="button" class="primary" data-goto="2">Дальше: Ступень 2 →</button>
+    </div>
+  </section>
+
+  <!-- ==================== СТУПЕНЬ 2 ==================== -->
+  <section id="step-2" class="card hidden">
+    <h2>Ступень 2. Синтез, компрессор и бюджет буфера DAW в коде</h2>
+    <div class="note-edu">
+      <strong>Пример парой:</strong> слева — как в ~15 строках рождается звук (пила наивная vs PolyBLEP vs щипок Karplus-Strong); справа — как размер буфера DAW и компрессор задают реальную задержку в миллисекундах (точное отношение <code>buffer / 48000</code>).
+    </div>
+
+    <div class="predict-box" id="pred2-box">
+      <div class="predict-title">🔮 Предскажи, потом смотри (#2)</div>
+      <div>Если взять запись щипка струны Karplus-Strong и развернуть её задом наперёд (reverse), у двух файлов будет <strong>одинаковая</strong> глобальная АЧХ по всему файлу. Что именно позволит AI-модели отличить прямой щипок от обратного?</div>
+      <div class="predict-opts">
+        <button type="button" data-p="2" data-ans="amp">Только общая громкость (LUFS)</button>
+        <button type="button" data-p="2" data-ans="timefreq">Эволюция спектра во времени (2D мел-спектрограмма / покадровый STFT) и фаза</button>
+        <button type="button" data-p="2" data-ans="none">Ничто — для нейросети файлы неразличимы</button>
+      </div>
+      <div class="feedback" id="pred2-fb"></div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <h3>1) Синтез в коде (волна и спектр гармоник)</h3>
+        <div class="toggle-row" style="margin-bottom:8px;">
+          <button type="button" class="synth-btn primary" data-synth="naive">Наивная пила (алиасинг)</button>
+          <button type="button" class="synth-btn" data-synth="polyblep">Пила + PolyBLEP</button>
+          <button type="button" class="synth-btn" data-synth="karplus">Karplus-Strong (струна)</button>
+        </div>
+        <canvas id="synthCanvas" width="580" height="230" aria-label="Волна и спектр выбранного синтезатора"></canvas>
+        <div class="ctrl-row" style="margin-top:8px;">
+          <div class="ctrl-head">
+            <label for="decaySlider">Затухание струны Karplus-Strong (decay) / яркость</label>
+            <span class="val-chip" id="decayLabel">0.994</span>
+          </div>
+          <input id="decaySlider" type="range" min="0.900" max="0.998" step="0.002" value="0.994">
+          <div class="toggle-row" style="margin-top:8px;">
+            <button type="button" class="primary" id="playSynthBtn">▶ Прослушать синтезатор</button>
+            <span class="mono" style="font-size:12px; color:var(--muted)" id="synthDesc">Резкий скачок пилы → гармоники отражаются от Найквиста</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3>2) Буфер DAW (48 кГц) и компрессор</h3>
+        <canvas id="compCanvas" width="420" height="230" aria-label="Кривая компрессора и огибающая"></canvas>
+        <div class="controls" style="margin-top:8px;">
+          <div class="ctrl-row">
+            <div class="ctrl-head">
+              <label for="bufSelect">Размер аудиобуфера DAW (сэмплов)</label>
+              <span class="val-chip" id="bufLabel">128 → 2.67 мс</span>
+            </div>
+            <select id="bufSelect" style="width:100%">
+              <option value="64">64 сэмпла (1.33 мс на буфер — жёсткий дедлайн RT)</option>
+              <option value="128" selected>128 сэмплов (2.67 мс — комфортный мониторинг)</option>
+              <option value="256">256 сэмплов (5.33 мс — базовый режим)</option>
+              <option value="512">512 сэмплов (10.67 мс — тяжёлые плагины / ONNX)</option>
+              <option value="1024">1024 сэмпла (21.33 мс — сведение, заметно на голосе)</option>
+            </select>
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-head">
+              <label for="threshSlider">Порог компрессора (Threshold)</label>
+              <span class="val-chip" id="threshLabel">-18 дБ · Ratio 4:1</span>
+            </div>
+            <input id="threshSlider" type="range" min="-36" max="-6" step="2" value="-18">
+          </div>
+          <div class="kpi" id="kpi-daw">
+            <div class="k-lbl">Бюджет аудиопотока (туда-обратно ≈ 2 буфера)</div>
+            <div class="k-val" id="val-daw">5.33 мс · запас для ML: низкий</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mission-box">
+      🎯 <strong>Миссия ступени 2:</strong> переключи <strong>Наивную пилу → PolyBLEP</strong> (увидь разницу красных отражённых гармоник), послушай <strong>Karplus-Strong</strong> при <code>decay = 0.996</code> и <code>0.920</code>, а в блоке DAW найди размер буфера при 48 кГц, при котором <strong>один</strong> буфер превышает 10 мс.
+    </div>
+
+    <div class="footer-nav">
+      <button type="button" data-goto="1">← Ступень 1</button>
+      <button type="button" class="primary" data-goto="3">Дальше: Ступень 3 (🗡 Злой случай) →</button>
+    </div>
+  </section>
+
+  <!-- ==================== СТУПЕНЬ 3 ==================== -->
+  <section id="step-3" class="card hidden">
+    <h2>Ступень 3. 🗡 Сломай и почини AI-аудиотракт</h2>
+    <div class="note-edu">
+      <strong>Учебный сценарий;</strong> числа качества и вероятности ниже рассчитаны по демонстрационной модели, чтобы показать причинно-следственные связи (какой именно узел вносит искажение и какая мера его останавливает), а не замер конкретной нейросети.
+    </div>
+
+    <div class="predict-box" id="pred3-box">
+      <div class="predict-title">🔮 Предскажи, потом смотри (#3)</div>
+      <div>Банковский детектор голосовых дипфейков обучен на чистых WAV-записях 16 кГц и опирается на высокочастотные следы нейро-вокодера. В продакшене звонок проходит через <strong>Opus 24 kbps / MP3 64 kbps</strong>. Что вероятнее всего произойдёт с детектором?</div>
+      <div class="predict-opts">
+        <button type="button" data-p="3" data-ans="better">Станет точнее — кодек уберёт лишний шум</button>
+        <button type="button" data-p="3" data-ans="drop">Точность упадёт: психоакустическое сжатие срезает и замазывает те же ВЧ/фазовые следы</button>
+        <button type="button" data-p="3" data-ans="same">Ничего не изменится — текст слов тот же</button>
+      </div>
+      <div class="feedback" id="pred3-fb"></div>
+    </div>
+
+    <div class="pipeline" id="pipelineNodes">
+      <div class="node ok" id="node-src" title="Исходник из студии или микрофона: 48 кГц, 24 бит PCM">
+        <div class="n-title">1. Входной WAV</div>
+        <div class="n-sub">48 кГц · 24 бит · чистый сигнал + транзиенты</div>
+      </div>
+      <div class="node" id="node-res" title="Перевод частоты дискретизации в формат модели (16 кГц)">
+        <div class="n-title">2. Ресэмплинг</div>
+        <div class="n-sub" id="sub-res">48 → 16 кГц</div>
+      </div>
+      <div class="node" id="node-cod" title="Сжатие с потерями (MP3/Opus) или без потерь">
+        <div class="n-title">3. Кодек канала</div>
+        <div class="n-sub" id="sub-cod">WAV (без потерь)</div>
+      </div>
+      <div class="node" id="node-voc" title="Мел-спектрограмма теряет фазу; способ восстановления определяет натуральность">
+        <div class="n-title">4. Мел → Вокодер</div>
+        <div class="n-sub" id="sub-voc">Нейро-вокодер</div>
+      </div>
+      <div class="node" id="node-ai" title="Итог для детектора синтетики и эмбеддинга CLAP">
+        <div class="n-title">5. AI-выход</div>
+        <div class="n-sub" id="sub-ai">Стабильные признаки</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="controls">
+        <div class="ctrl-row">
+          <div class="ctrl-head">
+            <label for="pResSelect">Узел 2: Ресэмплинг 48 → 16 кГц</label>
+          </div>
+          <select id="pResSelect" style="width:100%">
+            <option value="naive" selected>❌ Наивное прореживание (каждый 3-й сэмпл без LPF)</option>
+            <option value="lpf">✅ Ресэмплинг с антиалиасинг-фильтром (LPF &lt; 8 кГц)</option>
+          </select>
+        </div>
+
+        <div class="ctrl-row">
+          <div class="ctrl-head">
+            <label for="pCodSelect">Узел 3: Психоакустическое сжатие по дороге</label>
+          </div>
+          <select id="pCodSelect" style="width:100%">
+            <option value="mp3" selected>⚠️ Пересжатие MP3 64 kbps (срезает ВЧ и маскирует детали)</option>
+            <option value="opus">⚠️ Телефония Opus 24 kbps (агрессивное сжатие речи)</option>
+            <option value="wav">✅ Без потерь (WAV / FLAC) или детектор дообучен на кодеках</option>
+          </select>
+        </div>
+
+        <div class="ctrl-row">
+          <div class="ctrl-head">
+            <label for="pVocSelect">Узел 4: Восстановление волны из мел-спектрограммы</label>
+          </div>
+          <select id="pVocSelect" style="width:100%">
+            <option value="gl" selected>⚠️ Грубая оценка фазы (Griffin-Lim, металлический призвук)</option>
+            <option value="neural">✅ Нейро-вокодер (HiFi-GAN / BigVGAN)</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <div class="kpi-strip" style="grid-template-columns:1fr; margin-top:0;">
+          <div class="kpi" id="kpi-p-alias">
+            <div class="k-lbl">Искажение алиасингом на входе AI (учебн.)</div>
+            <div class="k-val" id="val-p-alias">—</div>
+          </div>
+          <div class="kpi" id="kpi-p-det">
+            <div class="k-lbl">Сохранность признаков для детектора дипфейка (учебн.)</div>
+            <div class="k-val" id="val-p-det">—</div>
+          </div>
+          <div class="kpi" id="kpi-p-fix">
+            <div class="k-lbl">Что конкретно остановлено / что ещё сломано</div>
+            <div class="k-val" style="font-size:13px; font-weight:500; font-family:var(--sans)" id="val-p-fix">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mission-box" id="m3-status">
+      🎯 <strong>Миссия ступени 3:</strong> сначала посмотри на «сломанный» стартовый тракт, затем <strong>почини все три узла</strong> так, чтобы убрать алиасинг, сохранить признаки для детектора и восстановить естественную фазу, и посмотри, какая конкретно операция остановлена на каждом шаге.
+    </div>
+
+    <div class="footer-nav">
+      <button type="button" data-goto="2">← Ступень 2</button>
+      <button type="button" class="primary" data-goto="4">Перейти к итогу миссии →</button>
+    </div>
+  </section>
+
+  <!-- ==================== ФИНАЛ ==================== -->
+  <section id="step-4" class="card hidden">
+    <h2>Финал · Итог миссии стенда `0.SND.01`</h2>
+    <div class="kpi-strip">
+      <div class="kpi" id="fin-preds">
+        <div class="k-lbl">Предсказаний угадано</div>
+        <div class="k-val" id="fin-preds-val">0 / 3</div>
+      </div>
+      <div class="kpi" id="fin-m1">
+        <div class="k-lbl">Ступень 1 · Алиасинг проверен</div>
+        <div class="k-val" id="fin-m1-val">в процессе</div>
+      </div>
+      <div class="kpi" id="fin-m3">
+        <div class="k-lbl">Ступень 3 · AI-тракт починен</div>
+        <div class="k-val" id="fin-m3-val">в процессе</div>
+      </div>
+    </div>
+
+    <div class="mission-box" style="margin-top:14px;">
+      <strong>Что удобно перенести в ответ задания 2 сессии:</strong>
+      <ul style="margin:6px 0 0 18px; padding:0;">
+        <li>На какую фантомную частоту сворачивается тон <strong>10 000 Гц</strong> при <code>fs = 16 000 Гц</code> без LPF (и что делает LPF).</li>
+        <li>Начиная с какого размера буфера DAW (при 48 кГц) один буфер превышает 10 мс — и почему это важно для запуска ML-плагина в реальном времени.</li>
+        <li>Какой узел в ступени 3 (ресэмплинг, кодек или вокодер) ломал именно детектор синтетики, а какой — естественность восстановления голоса.</li>
+      </ul>
+    </div>
+
+    <div style="margin-top:14px;">
+      <button type="button" id="spoilerBtn">🔒 Открыть краткий разбор (только после сдачи заданий)</button>
+      <div id="spoilerPanel" class="spoiler-panel hidden">
+        <strong>Разбор после заданий:</strong>
+        <ul style="margin:6px 0 0 18px; padding:0;">
+          <li><strong>Алиасинг 10 000 Гц при fs = 16 000 Гц:</strong> предел Найквиста = 8 000 Гц, поэтому без LPF 10 000 Гц отражается вниз в <code>|10 000 − 16 000| = 6 000 Гц</code> — на выходе появляется ложная слышимая частота, которой не было в оригинале. Включение LPF перед прореживанием срезает всё выше 8 кГц до выборки, останавливая отражение в рабочий диапазон.</li>
+          <li><strong>Буфер DAW при 48 кГц:</strong> 256 сэмплов = 5.33 мс; <strong>512 сэмплов = 10.67 мс</strong> (&gt; 10 мс на один буфер, а с входом и выходом &gt; 21 мс). Чем меньше буфер, тем ниже задержка при записи, но тем жёстче временной бюджет на один проход аудиотреда (включая инференс нейросети).</li>
+          <li><strong>AI-тракт:</strong> ресэмплинг без LPF замусоривает входной спектр фантомными гармониками; психоакустическое пересжатие MP3/Opus стирает ВЧ-следы вокодера, роняя неадаптированный детектор дипфейков; а Griffin-Lim даёт фазовые артефакты при восстановлении звука из мел-спектрограммы, чего избегают современные нейро-вокодеры.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-nav">
+      <button type="button" data-goto="3">← Ступень 3</button>
+      <button type="button" data-goto="1">↺ В начало</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const state = {
+    step: 1,
+    soundOn: true,
+    freq: 1500,
+    sr: 16000,
+    lpf: false,
+    lowBits: false,
+    dither: false,
+    synth: 'naive',
+    decay: 0.994,
+    bufSize: 128,
+    thresh: -18,
+    pRes: 'naive',
+    pCod: 'mp3',
+    pVoc: 'gl',
+    preds: { 1: null, 2: null, 3: null },
+    m1Hit10k: false,
+    m3Fixed: false
+  };
+
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!state.soundOn) return null;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (!audioCtx) audioCtx = new AC();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function aliasFreq(f, fs) {
+    const folded = Math.abs(f - Math.round(f / fs) * fs);
+    return Math.round(folded);
+  }
+
+  // ===== НАВИГАЦИЯ =====
+  const stepPills = document.querySelectorAll('.step-pill');
+  function goStep(n) {
+    state.step = n;
+    for (let i = 1; i <= 4; i++) {
+      document.getElementById('step-' + i).classList.toggle('hidden', i !== n);
+    }
+    stepPills.forEach(p => {
+      const ps = Number(p.dataset.step);
+      p.classList.toggle('active', ps === n);
+    });
+    if (n === 1) renderAlias();
+    if (n === 2) { renderSynth(); renderComp(); }
+    if (n === 3) renderPipeline();
+    if (n === 4) renderFinal();
+  }
+  stepPills.forEach(p => p.addEventListener('click', () => goStep(Number(p.dataset.step))));
+  document.querySelectorAll('[data-goto]').forEach(b =>
+    b.addEventListener('click', () => goStep(Number(b.dataset.goto)))
+  );
+
+  // Тема и звук
+  const themeBtn = document.getElementById('themeBtn');
+  themeBtn.addEventListener('click', () => {
+    const dark = document.body.getAttribute('data-theme') === 'dark';
+    document.body.setAttribute('data-theme', dark ? 'light' : 'dark');
+    themeBtn.textContent = dark ? '🌙 Тёмная тема' : '☀️ Светлая тема';
+  });
+
+  const muteBtn = document.getElementById('muteBtn');
+  muteBtn.addEventListener('click', () => {
+    state.soundOn = !state.soundOn;
+    muteBtn.textContent = state.soundOn ? '🔊 Звук: вкл' : '🔇 Звук: выкл';
+  });
+
+  // ===== ПРЕДСКАЗАНИЯ =====
+  const predAnswers = {
+    1: {
+      ok: 'fold',
+      good: '✅ Верно! При fs = 8 000 Гц предел Найквиста = 4 000 Гц. Без фильтра тон 6 500 Гц сворачивается в |6 500 − 8 000| = 1 500 Гц — и звучит как реальный паразитный тон.',
+      bad: '❌ Не совсем. Сигнал выше Найквиста (4 000 Гц) при грубом прореживании не исчезает и не остаётся на 6 500 Гц: сэмплы ложатся ровно на волну |6 500 − 8 000| = 1 500 Гц. Нажми «Сценарий из #1» ниже, чтобы увидеть и услышать это.'
+    },
+    2: {
+      ok: 'timefreq',
+      good: '✅ Точно! Глобальная АЧХ усредняет весь файл и теряет порядок событий во времени (и фазу). Покадровый STFT / 2D мел-спектрограмма сразу видит резкую яркую атаку в начале против плавного нарастания в конце.',
+      bad: '❌ У прямого и обратного щипка одинаковы и громкость (LUFS), и глобальная АЧХ по всему файлу. Отличает их распределение энергии во времени (2D мел-спектрограмма / STFT) и фаза.'
+    },
+    3: {
+      ok: 'drop',
+      good: '✅ Верно! Психоакустические кодеки (MP3/Opus) экономят битрейт именно там, где ухо менее чувствительно — на высоких частотах и тонких фазовых деталях, по которым часто ловят следы вокодера. Поэтому детектор нужно тестировать и дообучать на целевых кодеках.',
+      bad: '❌ На практике точность неадаптированного детектора падает: MP3/Opus срезают и замазывают высокочастотные и фазовые артефакты вокодера. Проверь это на конвейере ниже.'
+    }
+  };
+
+  document.querySelectorAll('[data-p]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = Number(btn.dataset.p);
+      const ans = btn.dataset.ans;
+      const cfg = predAnswers[p];
+      const isOk = ans === cfg.ok;
+      if (state.preds[p] === null) state.preds[p] = isOk;
+      const fb = document.getElementById('pred' + p + '-fb');
+      fb.textContent = isOk ? cfg.good : cfg.bad;
+      fb.className = 'feedback show ' + (isOk ? 'ok' : 'bad');
+      renderFinal();
+    });
+  });
+
+  // ===== СТУПЕНЬ 1: АЛИАСИНГ И ДИЗЕРИНГ =====
+  const aliasCanvas = document.getElementById('aliasCanvas');
+  const aCtx = aliasCanvas.getContext('2d');
+
+  function renderAlias() {
+    const nyq = state.sr / 2;
+    const isAliased = state.freq > nyq;
+    const effFreq = isAliased ? (state.lpf ? 0 : aliasFreq(state.freq, state.sr)) : state.freq;
+
+    if (state.sr === 16000 && state.freq === 10000 && !state.lpf) {
+      state.m1Hit10k = true;
+      document.querySelector('[data-step="1"]').classList.add('done');
+    }
+
+    document.getElementById('freqLabel').textContent = state.freq.toLocaleString('ru-RU') + ' Гц';
+    document.getElementById('srLabel').textContent = state.sr.toLocaleString('ru-RU') + ' Гц';
+    document.getElementById('val-nyq').textContent = nyq.toLocaleString('ru-RU') + ' Гц';
+
+    const aliasEl = document.getElementById('val-alias');
+    const kpiAlias = document.getElementById('kpi-alias');
+    if (isAliased && !state.lpf) {
+      aliasEl.textContent = effFreq.toLocaleString('ru-RU') + ' Гц (алиас!)';
+      kpiAlias.className = 'kpi danger';
+    } else if (isAliased && state.lpf) {
+      aliasEl.textContent = 'Срезан LPF (тишина)';
+      kpiAlias.className = 'kpi ok';
+    } else {
+      aliasEl.textContent = effFreq.toLocaleString('ru-RU') + ' Гц (точно)';
+      kpiAlias.className = 'kpi ok';
+    }
+
+    const qEl = document.getElementById('val-q');
+    const kpiQ = document.getElementById('kpi-q');
+    if (!state.lowBits) {
+      qEl.textContent = '24 бит (чисто)';
+      kpiQ.className = 'kpi';
+    } else if (state.dither) {
+      qEl.textContent = '4 бит + TPDF-дизер';
+      kpiQ.className = 'kpi warn';
+    } else {
+      qEl.textContent = '4 бит (ступеньки)';
+      kpiQ.className = 'kpi danger';
+    }
+
+    // Рисуем осциллограф (окно 2 мс)
+    const W = aliasCanvas.width, H = aliasCanvas.height;
+    const mid = H / 2, amp = H * 0.36;
+    const dur = 0.002; // 2 мс
+    aCtx.clearRect(0, 0, W, H);
+    aCtx.fillStyle = getComputedStyle(document.body).getPropertyValue('--canvas-bg') || '#090d12';
+    aCtx.fillRect(0, 0, W, H);
+
+    // Сетка
+    aCtx.strokeStyle = '#1f2b3a';
+    aCtx.lineWidth = 1;
+    for (let g = 1; g < 4; g++) {
+      const y = (H / 4) * g;
+      aCtx.beginPath(); aCtx.moveTo(0, y); aCtx.lineTo(W, y); aCtx.stroke();
+    }
+
+    function quantize(v, seed) {
+      if (!state.lowBits) return v;
+      const levels = 7; // ~4 бит со знаком
+      let x = v;
+      if (state.dither) {
+        // Детерминированный треугольный шум (TPDF)
+        const r1 = Math.sin(seed * 12.9898) * 43758.5453;
+        const r2 = Math.sin(seed * 78.233) * 24634.6345;
+        const n1 = (r1 - Math.floor(r1)) - 0.5;
+        const n2 = (r2 - Math.floor(r2)) - 0.5;
+        x += (n1 + n2) / levels;
+      }
+      return Math.max(-1, Math.min(1, Math.round(x * levels) / levels));
+    }
+
+    // 1) Непрерывный оригинал (тонкая голубая)
+    aCtx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+    aCtx.lineWidth = 2;
+    aCtx.beginPath();
+    for (let px = 0; px < W; px++) {
+      const t = (px / W) * dur;
+      const v = Math.sin(2 * Math.PI * state.freq * t);
+      const y = mid - v * amp;
+      if (px === 0) aCtx.moveTo(px, y); else aCtx.lineTo(px, y);
+    }
+    aCtx.stroke();
+
+    // 2) Восстановленная волна (зелёная или красная пунктирная при алиасинге)
+    aCtx.strokeStyle = (isAliased && !state.lpf) ? '#fb7185' : '#2dd4bf';
+    aCtx.lineWidth = 2.5;
+    aCtx.setLineDash((isAliased && !state.lpf) ? [7, 5] : []);
+    aCtx.beginPath();
+    for (let px = 0; px < W; px++) {
+      const t = (px / W) * dur;
+      let v = 0;
+      if (effFreq > 0) {
+        // Определяем знак фазы при свёртке, чтобы кривая проходила точно через сэмплы
+        const k = Math.round(state.freq / state.sr);
+        const sign = (state.freq - k * state.sr) >= 0 ? 1 : -1;
+        v = sign * Math.sin(2 * Math.PI * effFreq * t);
+      }
+      v = quantize(v, px + 1);
+      const y = mid - v * amp;
+      if (px === 0) aCtx.moveTo(px, y); else aCtx.lineTo(px, y);
+    }
+    aCtx.stroke();
+    aCtx.setLineDash([]);
+
+    // 3) Точки сэмплов
+    const nSamples = Math.floor(dur * state.sr) + 1;
+    aCtx.fillStyle = '#fbbf24';
+    for (let i = 0; i < nSamples; i++) {
+      const t = i / state.sr;
+      const px = (t / dur) * W;
+      let v = (isAliased && state.lpf) ? 0 : Math.sin(2 * Math.PI * state.freq * t);
+      v = quantize(v, i * 17 + 3);
+      const y = mid - v * amp;
+      aCtx.beginPath();
+      aCtx.arc(px, y, 4, 0, Math.PI * 2);
+      aCtx.fill();
+    }
+
+    // Подпись легенды
+    aCtx.fillStyle = '#cbd5e1';
+    aCtx.font = '12px ui-monospace, Consolas, monospace';
+    aCtx.fillText('Голубая: вход  |  Точки: сэмплы (fs)  |  Бирюзовая/красная: выход', 10, 18);
+  }
+
+  document.getElementById('freqSlider').addEventListener('input', e => {
+    state.freq = Number(e.target.value);
+    renderAlias();
+  });
+  document.getElementById('srSelect').addEventListener('change', e => {
+    state.sr = Number(e.target.value);
+    renderAlias();
+  });
+  document.getElementById('lpfBtn').addEventListener('click', e => {
+    state.lpf = !state.lpf;
+    e.target.textContent = 'LPF перед прореживанием: ' + (state.lpf ? 'ВКЛ' : 'ВЫКЛ');
+    renderAlias();
+  });
+  document.getElementById('bitsBtn').addEventListener('click', e => {
+    state.lowBits = !state.lowBits;
+    e.target.textContent = 'Разрядность: ' + (state.lowBits ? '4 бит (грубо)' : '24 бит');
+    document.getElementById('ditherBtn').disabled = !state.lowBits;
+    if (!state.lowBits) {
+      state.dither = false;
+      document.getElementById('ditherBtn').textContent = 'TPDF-дизеринг: ВЫКЛ';
+    }
+    renderAlias();
+  });
+  document.getElementById('ditherBtn').addEventListener('click', e => {
+    state.dither = !state.dither;
+    e.target.textContent = 'TPDF-дизеринг: ' + (state.dither ? 'ВКЛ' : 'ВЫКЛ');
+    renderAlias();
+  });
+  document.getElementById('presetAliasBtn').addEventListener('click', () => {
+    state.freq = 6500;
+    state.sr = 8000;
+    state.lpf = false;
+    document.getElementById('freqSlider').value = 6500;
+    document.getElementById('srSelect').value = '8000';
+    document.getElementById('lpfBtn').textContent = 'LPF перед прореживанием: ВЫКЛ';
+    renderAlias();
+  });
+
+  document.getElementById('playAliasBtn').addEventListener('click', () => {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const nyq = state.sr / 2;
+    const isAliased = state.freq > nyq;
+    const playF = isAliased ? (state.lpf ? 0 : aliasFreq(state.freq, state.sr)) : state.freq;
+    if (playF <= 0) return;
+    const sr = ctx.sampleRate;
+    const len = Math.floor(sr * 0.55);
+    const buf = ctx.createBuffer(1, len, sr);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const env = Math.min(1, i / 400) * Math.min(1, (len - i) / 800);
+      let s = Math.sin(2 * Math.PI * playF * i / sr) * 0.25;
+      if (state.lowBits) {
+        const levels = 7;
+        if (state.dither) s += ((Math.random() - 0.5) + (Math.random() - 0.5)) * 0.25 / levels;
+        s = Math.round(s * levels) / levels;
+      }
+      ch[i] = s * env;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start();
+  });
+
+  // ===== СТУПЕНЬ 2: СИНТЕЗ И БУФЕР/КОМПРЕССОР =====
+  const synthCanvas = document.getElementById('synthCanvas');
+  const sCtx = synthCanvas.getContext('2d');
+  const compCanvas = document.getElementById('compCanvas');
+  const cCtx = compCanvas.getContext('2d');
+
+  function renderSynth() {
+    document.getElementById('decayLabel').textContent = state.decay.toFixed(3);
+    const W = synthCanvas.width, H = synthCanvas.height;
+    sCtx.clearRect(0, 0, W, H);
+    sCtx.fillStyle = '#090d12';
+    sCtx.fillRect(0, 0, W, H);
+
+    // Делим холст: слева волна, справа спектр гармоник
+    const split = Math.floor(W * 0.52);
+    sCtx.strokeStyle = '#243040';
+    sCtx.beginPath(); sCtx.moveTo(split, 0); sCtx.lineTo(split, H); sCtx.stroke();
+
+    const mid = H * 0.55, amp = H * 0.30;
+    sCtx.strokeStyle = '#2dd4bf';
+    sCtx.lineWidth = 2;
+    sCtx.beginPath();
+
+    const desc = document.getElementById('synthDesc');
+    if (state.synth === 'naive') {
+      desc.textContent = 'Наивная пила: вертикальный скачок → гармоники выше Найквиста отражаются вниз (красные пики).';
+      for (let x = 10; x < split - 10; x++) {
+        const phase = ((x - 10) / 70) % 1;
+        const v = 2 * phase - 1;
+        const y = mid - v * amp;
+        if (x === 10) sCtx.moveTo(x, y); else sCtx.lineTo(x, y);
+      }
+      sCtx.stroke();
+    } else if (state.synth === 'polyblep') {
+      desc.textContent = 'Пила + PolyBLEP: углы скачка сглажены полиномом 2-й степени → алиасинг резко подавлен.';
+      for (let x = 10; x < split - 10; x++) {
+        const p = ((x - 10) / 70) % 1;
+        let v = 2 * p - 1;
+        const dt = 0.09;
+        if (p < dt) { const t = p / dt; v -= (t + t - t * t - 1); }
+        else if (p > 1 - dt) { const t = (p - 1) / dt; v -= (t * t + t + t + 1); }
+        const y = mid - v * amp;
+        if (x === 10) sCtx.moveTo(x, y); else sCtx.lineTo(x, y);
+      }
+      sCtx.stroke();
+    } else {
+      desc.textContent = 'Karplus-Strong: шум в коротком буфере + усреднение 2 сэмплов → яркая атака и затухающие ВЧ.';
+      let seed = 13;
+      const period = 34;
+      const buf = [];
+      for (let i = 0; i < period; i++) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        buf.push((seed / 0x3fffffff) - 1);
+      }
+      const steps = split - 20;
+      for (let i = 0; i < steps; i++) {
+        const idx = i % period;
+        const nxt = (idx + 1) % period;
+        const v = buf[idx];
+        buf[idx] = 0.5 * (buf[idx] + buf[nxt]) * state.decay;
+        const x = 10 + i;
+        const y = mid - v * amp;
+        if (i === 0) sCtx.moveTo(x, y); else sCtx.lineTo(x, y);
+      }
+      sCtx.stroke();
+    }
+
+    // Спектр справа (учебные полосы гармоник)
+    const specX = split + 18;
+    const specW = W - specX - 16;
+    const baseY = H - 24;
+    const maxBar = H - 62;
+    const nBars = 14;
+    for (let k = 1; k <= nBars; k++) {
+      let mag = 1 / k;
+      if (state.synth === 'karplus') {
+        const damp = Math.pow(state.decay, k * 14);
+        mag = (0.9 / Math.pow(k, 0.85)) * damp;
+      }
+      const bx = specX + ((k - 1) / nBars) * specW;
+      const bw = Math.max(6, specW / nBars - 5);
+      const bh = Math.min(maxBar, mag * maxBar * 1.05);
+      sCtx.fillStyle = '#38bdf8';
+      sCtx.fillRect(bx, baseY - bh, bw, bh);
+
+      // Красные «отражённые» алиас-пики для наивной пилы
+      if (state.synth === 'naive' && k % 2 === 0) {
+        const abh = Math.min(maxBar * 0.45, (0.28 / (1 + k * 0.12)) * maxBar);
+        sCtx.fillStyle = '#fb7185';
+        sCtx.fillRect(bx + 3, baseY - abh, Math.max(3, bw - 4), abh);
+      } else if (state.synth === 'polyblep' && k % 2 === 0) {
+        const abh = Math.max(2, (0.04 / (1 + k * 0.2)) * maxBar);
+        sCtx.fillStyle = 'rgba(251, 113, 133, 0.55)';
+        sCtx.fillRect(bx + 3, baseY - abh, Math.max(3, bw - 4), abh);
+      }
+    }
+
+    sCtx.fillStyle = '#cbd5e1';
+    sCtx.font = '12px ui-monospace, Consolas, monospace';
+    sCtx.fillText('Форма волны', 12, 18);
+    sCtx.fillText('Спектр (синий: осн., красн.: алиас)', split + 10, 18);
+  }
+
+  document.querySelectorAll('.synth-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      state.synth = b.dataset.synth;
+      document.querySelectorAll('.synth-btn').forEach(x => x.classList.remove('primary'));
+      b.classList.add('primary');
+      renderSynth();
+    });
+  });
+
+  document.getElementById('decaySlider').addEventListener('input', e => {
+    state.decay = Number(e.target.value);
+    renderSynth();
+  });
+
+  document.getElementById('playSynthBtn').addEventListener('click', () => {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const sr = ctx.sampleRate;
+    const len = Math.floor(sr * 1.1);
+    const buf = ctx.createBuffer(1, len, sr);
+    const ch = buf.getChannelData(0);
+    if (state.synth === 'karplus') {
+      const period = Math.max(2, Math.round(sr / 146.83)); // D3
+      const ring = new Float32Array(period);
+      for (let i = 0; i < period; i++) ring[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < len; i++) {
+        const idx = i % period;
+        const nxt = (idx + 1) % period;
+        ch[i] = ring[idx] * 0.35;
+        ring[idx] = 0.5 * (ring[idx] + ring[nxt]) * state.decay;
+      }
+    } else {
+      const f = 220;
+      const dt = f / sr;
+      let p = 0;
+      for (let i = 0; i < len; i++) {
+        const env = Math.min(1, i / 500) * Math.min(1, (len - i) / 2000);
+        let v = 2 * p - 1;
+        if (state.synth === 'polyblep') {
+          if (p < dt) { const t = p / dt; v -= (t + t - t * t - 1); }
+          else if (p > 1 - dt) { const t = (p - 1) / dt; v -= (t * t + t + t + 1); }
+        }
+        ch[i] = v * 0.16 * env;
+        p += dt;
+        if (p >= 1) p -= 1;
+      }
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start();
+  });
+
+  function renderComp() {
+    const msOne = (state.bufSize / 48000) * 1000;
+    const msRt = msOne * 2;
+    document.getElementById('bufLabel').textContent = state.bufSize + ' → ' + msOne.toFixed(2) + ' мс';
+    document.getElementById('threshLabel').textContent = state.thresh + ' дБ · Ratio 4:1';
+
+    const kpiDaw = document.getElementById('kpi-daw');
+    const valDaw = document.getElementById('val-daw');
+    let mlBudget = 'низкий (жёсткий RT-лимит)';
+    if (state.bufSize >= 512) {
+      mlBudget = 'высокий, но задержка заметна при записи';
+      kpiDaw.className = 'kpi warn';
+    } else if (state.bufSize >= 256) {
+      mlBudget = 'средний (под лёгкий ONNX / NAM)';
+      kpiDaw.className = 'kpi ok';
+    } else {
+      kpiDaw.className = 'kpi';
+    }
+    valDaw.textContent = msRt.toFixed(2) + ' мс (2 буф.) · запас для ML: ' + mlBudget;
+
+    // График кривой компрессора (Вход дБ → Выход дБ)
+    const W = compCanvas.width, H = compCanvas.height;
+    cCtx.clearRect(0, 0, W, H);
+    cCtx.fillStyle = '#090d12';
+    cCtx.fillRect(0, 0, W, H);
+
+    const pad = 34;
+    const plotW = W - pad * 1.6;
+    const plotH = H - pad * 1.7;
+    const dbToX = db => pad + ((db + 48) / 48) * plotW;
+    const dbToY = db => (H - pad) - ((db + 48) / 48) * plotH;
+
+    // Сетка
+    cCtx.strokeStyle = '#1f2b3a';
+    cCtx.lineWidth = 1;
+    for (let db = -48; db <= 0; db += 12) {
+      const x = dbToX(db), y = dbToY(db);
+      cCtx.beginPath(); cCtx.moveTo(x, pad * 0.7); cCtx.lineTo(x, H - pad); cCtx.stroke();
+      cCtx.beginPath(); cCtx.moveTo(pad, y); cCtx.lineTo(pad + plotW, y); cCtx.stroke();
+    }
+
+    // Линия 1:1
+    cCtx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+    cCtx.setLineDash([5, 5]);
+    cCtx.beginPath();
+    cCtx.moveTo(dbToX(-48), dbToY(-48));
+    cCtx.lineTo(dbToX(0), dbToY(0));
+    cCtx.stroke();
+    cCtx.setLineDash([]);
+
+    // Кривая компрессора 4:1
+    const ratio = 4;
+    cCtx.strokeStyle = '#fbbf24';
+    cCtx.lineWidth = 2.5;
+    cCtx.beginPath();
+    for (let db = -48; db <= 0; db += 1) {
+      const outDb = db <= state.thresh ? db : state.thresh + (db - state.thresh) / ratio;
+      const x = dbToX(db), y = dbToY(outDb);
+      if (db === -48) cCtx.moveTo(x, y); else cCtx.lineTo(x, y);
+    }
+    cCtx.stroke();
+
+    // Точка порога
+    cCtx.fillStyle = '#2dd4bf';
+    cCtx.beginPath();
+    cCtx.arc(dbToX(state.thresh), dbToY(state.thresh), 5, 0, Math.PI * 2);
+    cCtx.fill();
+
+    const grAtPeak = (0 - state.thresh) - (0 - state.thresh) / ratio;
+    cCtx.fillStyle = '#cbd5e1';
+    cCtx.font = '12px ui-monospace, Consolas, monospace';
+    cCtx.fillText('Компрессор 4:1 · GR при 0 dBFS: -' + grAtPeak.toFixed(1) + ' дБ', 10, 17);
+  }
+
+  document.getElementById('bufSelect').addEventListener('change', e => {
+    state.bufSize = Number(e.target.value);
+    renderComp();
+  });
+  document.getElementById('threshSlider').addEventListener('input', e => {
+    state.thresh = Number(e.target.value);
+    renderComp();
+  });
+
+  // ===== СТУПЕНЬ 3: AI-АУДИОТРАКТ =====
+  function renderPipeline() {
+    const resOk = state.pRes === 'lpf';
+    const codOk = state.pCod === 'wav';
+    const vocOk = state.pVoc === 'neural';
+
+    const nRes = document.getElementById('node-res');
+    const nCod = document.getElementById('node-cod');
+    const nVoc = document.getElementById('node-voc');
+    const nAi = document.getElementById('node-ai');
+
+    nRes.className = 'node ' + (resOk ? 'ok' : 'danger');
+    document.getElementById('sub-res').textContent = resOk
+      ? 'LPF < 8 кГц → чистые 16 кГц'
+      : 'Без LPF → ВЧ 8–24 кГц заворачиваются в алиасы';
+
+    nCod.className = 'node ' + (codOk ? 'ok' : 'warn');
+    document.getElementById('sub-cod').textContent = codOk
+      ? 'WAV / адаптация под кодек'
+      : (state.pCod === 'mp3' ? 'MP3 64k режет ВЧ-детали' : 'Opus 24k сжимает речевую полосу');
+
+    nVoc.className = 'node ' + (vocOk ? 'ok' : 'warn');
+    document.getElementById('sub-voc').textContent = vocOk
+      ? 'Нейро-вокодер восстанавливает фазу'
+      : 'Griffin-Lim → «металлическая» фаза';
+
+    const allOk = resOk && codOk && vocOk;
+    nAi.className = 'node ' + (allOk ? 'ok' : (resOk ? 'warn' : 'danger'));
+    document.getElementById('sub-ai').textContent = allOk
+      ? 'Признаки чисты, артефакты сняты'
+      : 'Деградация признаков / звучания';
+
+    const kAlias = document.getElementById('kpi-p-alias');
+    kAlias.className = 'kpi ' + (resOk ? 'ok' : 'danger');
+    document.getElementById('val-p-alias').textContent = resOk
+      ? 'Остановлено: LPF срезал частоты > 8 кГц до выборки'
+      : 'Высокое: фантомные частоты попали в рабочий диапазон';
+
+    const kDet = document.getElementById('kpi-p-det');
+    let detTxt = '';
+    if (resOk && codOk) {
+      kDet.className = 'kpi ok';
+      detTxt = 'Высокая (~90% в учебн. сценарии)';
+    } else if (!codOk && !resOk) {
+      kDet.className = 'kpi danger';
+      detTxt = 'Критически низкая (~48% в учебн. сценарии)';
+    } else {
+      kDet.className = 'kpi warn';
+      detTxt = 'Просадка (~66% в учебн. сценарии)';
+    }
+    document.getElementById('val-p-det').textContent = detTxt;
+
+    const issues = [];
+    if (!resOk) issues.push('узел 2 вносит алиасинг при прореживании');
+    if (!codOk) issues.push('узел 3 затирает ВЧ/фазовые маркеры для детектора дипфейка');
+    if (!vocOk) issues.push('узел 4 даёт фазовые артефакты при синтезе обратно в волну');
+
+    const kFix = document.getElementById('kpi-p-fix');
+    if (issues.length === 0) {
+      state.m3Fixed = true;
+      document.querySelector('[data-step="3"]').classList.add('done');
+      kFix.className = 'kpi ok';
+      document.getElementById('val-p-fix').textContent =
+        'Все три причины устранены: LPF остановил отражение частот, тракт не затирает маркеры без адаптации, нейро-вокодер восстанавливает фазу.';
+    } else {
+      kFix.className = 'kpi warn';
+      document.getElementById('val-p-fix').textContent = 'Осталось исправить: ' + issues.join('; ') + '.';
+    }
+    renderFinal();
+  }
+
+  document.getElementById('pResSelect').addEventListener('change', e => { state.pRes = e.target.value; renderPipeline(); });
+  document.getElementById('pCodSelect').addEventListener('change', e => { state.pCod = e.target.value; renderPipeline(); });
+  document.getElementById('pVocSelect').addEventListener('change', e => { state.pVoc = e.target.value; renderPipeline(); });
+
+  // ===== ФИНАЛ =====
+  function renderFinal() {
+    const hits = Object.values(state.preds).filter(v => v === true).length;
+    document.getElementById('fin-preds-val').textContent = hits + ' / 3';
+    document.getElementById('fin-m1-val').textContent = state.m1Hit10k ? '✅ 10 кГц → 6 кГц' : 'проверь 10 кГц при 16 кГц';
+    document.getElementById('fin-m1').className = 'kpi ' + (state.m1Hit10k ? 'ok' : '');
+    document.getElementById('fin-m3-val').textContent = state.m3Fixed ? '✅ все 3 узла' : 'почини узлы 2–4';
+    document.getElementById('fin-m3').className = 'kpi ' + (state.m3Fixed ? 'ok' : '');
+  }
+
+  document.getElementById('spoilerBtn').addEventListener('click', e => {
+    const panel = document.getElementById('spoilerPanel');
+    const hidden = panel.classList.toggle('hidden');
+    e.target.textContent = hidden
+      ? '🔒 Открыть краткий разбор (только после сдачи заданий)'
+      : '🔓 Скрыть разбор';
+  });
+
+  // Первый рендер
+  renderAlias();
+  renderSynth();
+  renderComp();
+  renderPipeline();
+  renderFinal();
+})();
+</script>
+</body>
+</html>
